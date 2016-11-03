@@ -17,6 +17,7 @@ import pickle
 import os 
 from weighted_kde import gaussian_kde
 from six import string_types
+from shapely.geometry import Polygon, MultiPolygon
 
 class PDF_Processing(object):
     def __init__(self,variable_name,working_dir='./'):
@@ -88,7 +89,7 @@ class PDF_Processing(object):
         self._periods=self._data.period
 
 
-    def derive_regional_masking(self,input_data,shift_lon=0.0,regions=None):
+    def derive_regional_masking(self,input_data,shift_lon=0.0,regions_polygons=None):
         '''
         DUMMY FUNCTION TO BE FILLED WITH SREX REGIONAL INFORMATION. 
         '''
@@ -116,14 +117,18 @@ class PDF_Processing(object):
                 grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
 
         lon=lon-shift_lon
+        shift = len(lon)-np.where(lon==lon[0]-shift_lon)[0][0]
 
-        for country in regions_____:
+        self._srex_masks={}
+
+        for region in regions_polygons.keys():
+            poly=Polygon(regions_polygons[region]['points'])
             nx = len(grid_polygons[:,0])
             ny = len(grid_polygons[0,:])
             overlap = np.zeros((ny,nx))
             for i in range(nx):
                 for j in range(ny):
-                    intersect = grid_polygons[i,j].intersection(country).area/grid_polygons[i,j].area*country.area
+                    intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
                     overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
 
             overlap_zwi=overlap.copy()
@@ -134,8 +139,9 @@ class PDF_Processing(object):
                 
             output[output==0]=np.nan
             output=np.ma.masked_invalid(output)
-            return np.roll(output,shift,axis=1)
-            #return output
+            self._srex_masks[region]={}
+            self._srex_masks[region]['polygon']=regions_polygons[region]['points']
+            self._srex_masks[region]['mask']=np.roll(output,shift,axis=1)
 
 
     def derive_distributions(self,globaldist=True,regions=None):
