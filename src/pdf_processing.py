@@ -8,13 +8,15 @@ carl.schleussner@climateanalytics.org
 import numpy as np
 import netCDF4 as net
 import sys 
-sys.path.append('/home/carls/git_repos')
+#sys.path.append('/home/carls/git_repos')
 import dimarray as da
 import itertools
 import glob
 import datetime
 import pickle
 import os 
+from weighted_kde import gaussian_kde
+from six import string_types
 
 class PDF_Processing(object):
     def __init__(self,variable_name,working_dir='./'):
@@ -86,11 +88,54 @@ class PDF_Processing(object):
         self._periods=self._data.period
 
 
-    def derive_regional_masking(self,regions=None):
+    def derive_regional_masking(self,input_data,shift_lon=0.0,regions=None):
         '''
         DUMMY FUNCTION TO BE FILLED WITH SREX REGIONAL INFORMATION. 
         '''
+        print 'Read grid information and create polygons according to the projection.'
 
+        lat = input_data.lat
+        lon = input_data.lon.squeeze()+shift_lon
+
+        nx = len(lon)
+        ny = len(lat)
+        # loop over the grid to get dird polygons
+        grid_polygons = np.empty((nx,ny),dtype=Polygon)
+        dx = np.zeros((nx))
+        dy = np.zeros((ny))
+        dx[1:] = np.abs(np.diff(lon,1))
+        dx[0] = dx[1]
+        dy[1:] = np.abs(np.diff(lat,1))
+        dy[0] = dy[1]
+        for i in range(nx):
+            x1 = lon[i]-dx[i]/2.
+            x2 = lon[i]+dx[i]/2.
+            for j in range(ny):
+                y1 = lat[j]-dy[j]/2.
+                y2 = lat[j]+dy[j]/2.
+                grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
+
+        lon=lon-shift_lon
+
+        for country in regions_____:
+            nx = len(grid_polygons[:,0])
+            ny = len(grid_polygons[0,:])
+            overlap = np.zeros((ny,nx))
+            for i in range(nx):
+                for j in range(ny):
+                    intersect = grid_polygons[i,j].intersection(country).area/grid_polygons[i,j].area*country.area
+                    overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
+
+            overlap_zwi=overlap.copy()
+            overlap_sum=sum(overlap_zwi.flatten())
+            if overlap_sum!=0:
+                output=np.zeros(overlap.shape)
+                output=overlap/overlap_sum
+                
+            output[output==0]=np.nan
+            output=np.ma.masked_invalid(output)
+            return np.roll(output,shift,axis=1)
+            #return output
 
 
     def derive_distributions(self,globaldist=True,regions=None):
@@ -117,7 +162,6 @@ class PDF_Processing(object):
         Fit PDFs and CDFs to respective regional functions. See 
         https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
         For further information on the method. 
-
         cutinterval: type tuple : Min/Max range for the PDF
         globaldist: type str : Kernel, default 'gaussian'. See R-function for update
         bw: type int : smoothing bandwidth to be used.
@@ -135,16 +179,48 @@ class PDF_Processing(object):
 
             f = open(self._working_dir+'tmp/R_kernel_ana.R', 'w') 
             f.write('t<-read.table(\"'+fstring+'\") \n')
+            #f.write('pdf=density(t$V1,from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+kern+'\",bw='+str(bw)+',na.rm=TRUE) \n')
             f.write('pdf=density(t$V1,weights=t$V2/sum(t$V2),from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+kern+'\",bw='+str(bw)+',na.rm=TRUE) \n')
             f.write('out <- data.frame(x=pdf$x,y=pdf$y/sum(pdf$y))\n')
             f.write('write.table(out,\"'+rsavestring+'\" ,row.names = FALSE,col.names = FALSE ) \n')
             f.close()
             ret=os.system('Rscript '+self._working_dir+'tmp/R_kernel_ana.R')#, shell=True)
             if ret !=0:
-                print 'Error in Kernel Estimation', target, model
+                print 'Error in Kernel Estimation'
             r=np.loadtxt(rsavestring)
             self._distributions[region][key+'_pdf']=r
             cdf=r.copy()
             cdf[:,1]=[sum(r[:i,1]) for i in xrange(r.shape[0])]
             self._distributions[region][key+'_cdf']=cdf
-    
+
+    def kernel_in_PY(self,cutinterval,bw,kern='gaussian',region='global'):      
+        '''
+        Fit PDFs and CDFs to respective regional functions. See 
+        https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
+        For further information on the method. 
+        cutinterval: type tuple : Min/Max range for the PDF
+        globaldist: type str : Kernel, default 'gaussian'. See R-function for update
+        bw: type int : smoothing bandwidth to be used.
+        region: type str : Regional analysis. Currently global only. 
+        '''
+        if not os.path.exists(self._working_dir+'tmp/') :
+            os.mkdir(self._working_dir+'tmp/')
+
+        for key in self._periods:
+            weights=self._distributions['weight']
+            weights=weights.copy()/sum(weights)
+            kde=gaussian_kde(self._distributions[region][key],weights=weights)
+            kde.set_bandwidth(bw_method=bw)
+            #kde=gaussian_kde(self._distributions[region][key],weights=self._distributions['weight'],bw_method=bw)
+            pdf=np.zeros([512,2])
+            pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
+            pdf_zwi=kde(pdf[:,0])
+            pdf_zwi2=pdf_zwi.copy()
+            pdf[:,1]=pdf_zwi/sum(pdf_zwi2)
+            self._distributions[region][key+'_pdf']=pdf
+            cdf=pdf.copy()
+            cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
+            self._distributions[region][key+'_cdf']=cdf
+
+
+
