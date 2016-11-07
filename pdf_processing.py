@@ -19,6 +19,8 @@ from weighted_kde import gaussian_kde
 from six import string_types
 from shapely.geometry import Polygon, MultiPolygon
 import matplotlib.pylab as plt 
+from scipy.stats import ks_2samp #KS-Test
+
 
 class PDF_Processing(object):
     def __init__(self,variable_name,working_dir='./'):
@@ -172,12 +174,17 @@ class PDF_Processing(object):
         for region in self._masks.keys():
             if region!='global':
                 self._distributions[region]={}
-                mask=np.isfinite(self._masks[region].flatten())
-                self._distributions[region]['weight']=self._masks[region].flatten()[mask] 
+                mask=np.isfinite(self._masks[region].flatten()[nanfilter])
+                self._distributions[region]['weight']=self._masks[region].flatten()[nanfilter][mask] 
                 for key in self._periods:
                     t=self._data[key].values.flatten()
-                    self._distributions[region][key]=t[mask]      
-                      
+                    self._distributions[region][key]=t[nanfilter][mask]   
+
+
+    def get_ks_test(self):
+        self._ks={}
+        for region in self._masks.keys():
+            self._ks[region]=ks_2samp(self._distributions[region]['ref'],self._distributions[region]['Recent'])[1]
 
     def kernel_in_R(self,cutinterval,bw,kern='gaussian',region='global'):      
         '''
@@ -201,7 +208,6 @@ class PDF_Processing(object):
 
             f = open(self._working_dir+'tmp/R_kernel_ana.R', 'w') 
             f.write('t<-read.table(\"'+fstring+'\") \n')
-            #f.write('pdf=density(t$V1,from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+kern+'\",bw='+str(bw)+',na.rm=TRUE) \n')
             f.write('pdf=density(t$V1,weights=t$V2/sum(t$V2),from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+kern+'\",bw='+str(bw)+',na.rm=TRUE) \n')
             f.write('out <- data.frame(x=pdf$x,y=pdf$y/sum(pdf$y))\n')
             f.write('write.table(out,\"'+rsavestring+'\" ,row.names = FALSE,col.names = FALSE ) \n')
