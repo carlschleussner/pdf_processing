@@ -252,7 +252,6 @@ class PDF_Processing(object):
             weights=weights.copy()/sum(weights)
             kde=gaussian_kde(self._distributions[region][key],weights=weights)
             kde.set_bandwidth(bw_method=bw)
-            #kde=gaussian_kde(self._distributions[region][key],weights=self._distributions['weight'],bw_method=bw)
             pdf=np.zeros([512,2])
             pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
             pdf_zwi=kde(pdf[:,0])
