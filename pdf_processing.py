@@ -94,16 +94,20 @@ class PDF_Processing(object):
 
     def derive_regional_masking(self,input_data,shift_lon=0.0,regions_polygons=None):
         '''
-        DUMMY FUNCTION TO BE FILLED WITH SREX REGIONAL INFORMATION. 
+        Derive regional masks
+        The resulting masks can directly taken as weights for the distribution analysis. 
+        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
+        shift_lon:type float: longitude shift that is required to transform the lon axis of input_data to -180 to 180
+        region_polygons:type dict containing tuples: points of the polygons defining regions
         '''
-        print 'Read grid information and create polygons according to the projection.'
 
+        # get information about grid of input data
         lat = input_data.lat
         lon = input_data.lon.squeeze()+shift_lon
-
         nx = len(lon)
         ny = len(lat)
-        # loop over the grid to get dird polygons
+
+        # loop over the grid to get grid polygons
         grid_polygons = np.empty((nx,ny),dtype=Polygon)
         dx = np.zeros((nx))
         dy = np.zeros((ny))
@@ -120,34 +124,37 @@ class PDF_Processing(object):
                 #grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
                 grid_polygons[i,j] = Polygon([(y1,x1),(y1,x2),(y2,x2),(y2,x1)])
 
+        # since the lon axis has been shifted, masks and outputs will have to be shifted as well. This shift is computed here
         lon=lon-shift_lon
         shift = len(lon)-np.where(lon==lon[0]-shift_lon)[0][0]
 
 
         for region in regions_polygons.keys():
-        #for region in ['CEU']:
             poly=Polygon(regions_polygons[region]['poly'])
-
-            nx = len(grid_polygons[:,0])
-            ny = len(grid_polygons[0,:])
             overlap = np.zeros((ny,nx))
             for i in range(nx):
                 for j in range(ny):
+                    # check whether data exists in grid cell
                     if np.roll(self._masks['global'],shift,axis=1)[j,i]==1:
+                        # get fraction of grid-cell covered by polygon
                         intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
+                        # multiply overlap with latitude weighting
                         overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
 
+            # renormalize overlap to get sum(mask)=1
             overlap_zwi=overlap.copy()
             overlap_sum=sum(overlap_zwi.flatten())
             if overlap_sum!=0:
                 output=np.zeros(overlap.shape)
                 output=overlap/overlap_sum
+                # mask zeros
                 output[output==0]=np.nan
                 output=np.ma.masked_invalid(output)
+                # shift back to original longitudes
                 self._masks[region]=np.roll(output,shift,axis=1)
 
 
-    def derive_distributions(self,globaldist=True,regions=None):
+    def derive_distributions(self,globaldist=True):
         '''
         Derive distributions for different regions. Plus regional masking. NOT YET IMPLEMENTED
         globaldist: type Boolean : Flag whether or not regional distributions shall be derived
@@ -155,7 +162,7 @@ class PDF_Processing(object):
         self._distributions={}
         self._distributions['global']={}
 
-        # GLOBAL ONLY CURRENTLY IMPLEMENTED
+        # GLOBAL (one of the regions)
         for key in self._periods:            
             t=self._data[key].values.flatten()
             self._distributions['global'][key]=t[np.isfinite(t)]
@@ -168,12 +175,14 @@ class PDF_Processing(object):
         nanfilter=np.isfinite(self._data['ref'].values.flatten())
         self._distributions['global']['weight']=exweight[nanfilter]
 
-        # REGIONAL
+        # REGIONAL (SREX regions)
+        # mask grid-cells where no data exists in reference
         nanfilter=np.isfinite(self._data['ref'].values.flatten())
 
         for region in self._masks.keys():
             if region!='global':
                 self._distributions[region]={}
+                # use mask calculated in derive_regional_masking()
                 mask=np.isfinite(self._masks[region].flatten()[nanfilter])
                 self._distributions[region]['weight']=self._masks[region].flatten()[nanfilter][mask] 
                 for key in self._periods:
@@ -181,7 +190,11 @@ class PDF_Processing(object):
                     self._distributions[region][key]=t[nanfilter][mask]   
 
 
-    def get_ks_test(self):
+    def ks_test(self):
+        '''
+        2-sample KS test. Comparing distributions for 'ref' and 'recent'
+        Done for each region (global is a region)
+        '''
         self._ks={}
         for region in self._masks.keys():
             self._ks[region]=ks_2samp(self._distributions[region]['ref'],self._distributions[region]['Recent'])[1]
@@ -224,7 +237,7 @@ class PDF_Processing(object):
     def kernel_in_PY(self,cutinterval,bw,kern='gaussian',region='global'):      
         '''
         Fit PDFs and CDFs to respective regional functions. See 
-        https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
+        https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
         For further information on the method. 
         cutinterval: type tuple : Min/Max range for the PDF
         globaldist: type str : Kernel, default 'gaussian'. See R-function for update
