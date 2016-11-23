@@ -15,8 +15,10 @@ import glob
 import datetime
 import pickle
 import os 
+import random as random
 from weighted_kde import gaussian_kde
 from six import string_types
+from mpl_toolkits.basemap import Basemap
 from shapely.geometry import Polygon, MultiPolygon
 import matplotlib.pylab as plt 
 from scipy.stats import ks_2samp #KS-Test
@@ -45,10 +47,6 @@ class PDF_Processing(object):
         if  check_ref_period_only:
             mask=np.isfinite(input_data[ref_period[0]])
             print 'No of non-NAN grid cells in Reference Mask: ', np.sum(mask)
-            maskout=input_data[ref_period[0]].copy()
-            maskout[:,:]=np.NaN
-            maskout[mask]=1
-            self._masks={maskname:maskout}
 
         else:
             mask=np.isfinite(input_data[ref_period[0]:ref_period[1]].mean(axis=0))
@@ -57,39 +55,17 @@ class PDF_Processing(object):
                 mask*=np.isfinite(input_data[tp[0]:tp[1]].mean(axis=0))
                 print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
 
-            maskout=input_data[ref_period[0]].copy()
-            maskout[:,:]=np.NaN
-            maskout[mask]=1
-            self._masks={maskname:maskout}
+        maskout=input_data[ref_period[0]].copy()
+        maskout[:,:]=np.NaN
 
-    def derive_time_slices(self,input_data,ref_period,target_periods,period_names,mask_for_ref_period='global'):
-        '''
-        Grid cell level averaging for different periods along time axis        
-        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
-        ref_period:type tuple: [startyear,endyear]
-        target_periods:type list of tuples: [[startyear,endyear],...]
-        period_names:type list : names of reference periods 
-        mask_for_ref_period: type str : name of mask to be deployed, default='global'. If set to None, no masking will be used
-        Generates data_frame for each ref and target period 
-        '''
-        # Test for time axis to be annual integers
-        timeaxis=input_data.year        
-        if isinstance(input_data.year[0], int):
-            self._timeaxis=timeaxis 
-        else: 
-            raise ImportError("Time axis is not annual" ) 
-        
-        input_data_masked=input_data*self._masks['global']
-        # Derive time slices
-        # period_names.append('ref')
-        da_time_sliced=da.DimArray(axes=[np.asarray(period_names), input_data_masked.lat, input_data_masked.lon],dims=['period', 'lat', 'lon'] )        
-        da_time_sliced['ref']=input_data_masked[ref_period[0]:ref_period[1]].mean(axis=0)
+        # Derive distribution weight (For kernel estimation)
+        lat_weight=input_data[ref_period[0]].copy()
+        for l in lat_weight.lon:
+            lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
 
-        for period,pname in zip(target_periods,period_names):
-            da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)
-        
-        self._data=da_time_sliced
-        self._periods=self._data.period
+        maskout[mask]=lat_weight[mask]
+        self._masks={maskname:np.ma.masked_invalid(maskout)}
+
 
 
     def derive_regional_masking(self,input_data,shift_lon=0.0,regions_polygons=None):
@@ -135,7 +111,7 @@ class PDF_Processing(object):
             for i in range(nx):
                 for j in range(ny):
                     # check whether data exists in grid cell
-                    if np.roll(self._masks['global'],shift,axis=1)[j,i]==1:
+                    if np.isfinite(np.roll(self._masks['global'],shift,axis=1)[j,i]):
                         # get fraction of grid-cell covered by polygon
                         intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
                         # multiply overlap with latitude weighting
@@ -150,8 +126,43 @@ class PDF_Processing(object):
                 # mask zeros
                 output[output==0]=np.nan
                 output=np.ma.masked_invalid(output)
-                # shift back to original longitudes
-                self._masks[region]=np.roll(output,shift,axis=1)
+                # only save mask if more than 50 grid cells available 
+                if len(np.where(np.isfinite(output))[0])>50:
+                    # shift back to original longitudes
+                    self._masks[region]=np.roll(output,shift,axis=1)
+
+    def derive_time_slices(self,input_data,ref_period,target_periods,period_names,mask_for_ref_period='global'):
+        '''
+        Grid cell level averaging for different periods along time axis        
+        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
+        ref_period:type tuple: [startyear,endyear]
+        target_periods:type list of tuples: [[startyear,endyear],...]
+        period_names:type list : names of reference periods 
+        mask_for_ref_period: type str : name of mask to be deployed, default='global'. If set to None, no masking will be used
+        Generates data_frame for each ref and target period 
+        '''
+        # Test for time axis to be annual integers
+        timeaxis=input_data.year        
+        if isinstance(input_data.year[0], int):
+            self._timeaxis=timeaxis 
+        else: 
+            raise ImportError("Time axis is not annual" ) 
+        
+        # no nead since mask is apllied later during distr
+        #input_data_masked=input_data*self._masks['global']
+        input_data_masked=input_data#*self._masks['global']
+
+        # Derive time slices
+        # period_names.append('ref')
+        da_time_sliced=da.DimArray(axes=[np.asarray(period_names), input_data_masked.lat, input_data_masked.lon],dims=['period', 'lat', 'lon'] )        
+        da_time_sliced['ref']=input_data_masked[ref_period[0]:ref_period[1]].mean(axis=0)
+
+        for period,pname in zip(target_periods,period_names):
+            print pname,period
+            da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)
+        
+        self._data=da_time_sliced
+        self._periods=self._data.period
 
 
     def derive_distributions(self,globaldist=True):
@@ -160,35 +171,68 @@ class PDF_Processing(object):
         globaldist: type Boolean : Flag whether or not regional distributions shall be derived
         '''
         self._distributions={}
-        self._distributions['global']={}
-
-        # GLOBAL (one of the regions)
-        for key in self._periods:            
-            t=self._data[key].values.flatten()
-            self._distributions['global'][key]=t[np.isfinite(t)]
-        
-        # Derive distribution weight (for kernel estimation)
-        lat_weight=self._data['ref'].copy()
-        for l in lat_weight.lon:
-            lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
-        exweight=lat_weight.values.flatten()
-        nanfilter=np.isfinite(self._data['ref'].values.flatten())
-        self._distributions['global']['weight']=exweight[nanfilter]
 
         # REGIONAL (SREX regions)
         # mask grid-cells where no data exists in reference
+        # do we still need this nan filter??? isnt mask there for that?
+        nanfilter=np.isfinite(self._data['ref'].values.flatten())
+        for region in self._masks.keys():
+            self._distributions[region]={}
+            # use mask calculated in derive_regional_masking()
+            mask=np.isfinite(self._masks[region].flatten()[nanfilter])
+            self._distributions[region]['weight']=self._masks[region].flatten()[nanfilter][mask] 
+            for key in self._periods:
+                t=self._data[key].values.flatten()
+                self._distributions[region][key]=t[nanfilter][mask]   
+
+    def bootstrapping(self,input_data,nShuff):
+        # Test for time axis to be annual integers
+        timeaxis=input_data.year        
+        if isinstance(input_data.year[0], int):
+            self._timeaxis=timeaxis 
+        else: 
+            raise ImportError("Time axis is not annual" ) 
+        
+        # do we still need this nan filter??? isnt mask there for that?
         nanfilter=np.isfinite(self._data['ref'].values.flatten())
 
         for region in self._masks.keys():
-            if region!='global':
-                self._distributions[region]={}
-                # use mask calculated in derive_regional_masking()
-                mask=np.isfinite(self._masks[region].flatten()[nanfilter])
-                self._distributions[region]['weight']=self._masks[region].flatten()[nanfilter][mask] 
-                for key in self._periods:
-                    t=self._data[key].values.flatten()
-                    self._distributions[region][key]=t[nanfilter][mask]   
+            input_data_masked=input_data
+            mask=np.isfinite(self._masks[region].flatten()[nanfilter])
+            self._distributions[region]['shuffled']={}
+            for i in range(nShuff):
+                dat = input_data_masked[random.sample(timeaxis,20)]
+                mdat = np.ma.masked_array(dat,np.isnan(dat))
+                # input_sample is comparable to da_time_sliced
+                # .filled(np.nan) is required to maintain the same dimensions as ._distributions[region]['weight']
+                input_sample=np.mean(mdat,axis=0).filled(np.nan)
+                t=input_sample.flatten()
+                self._distributions[region]['shuffled'][i]=t[nanfilter][mask]              
 
+    def simple_difference(self):
+        '''
+        Get the difference in index between 'Recent' and 'ref'
+        Bootstrapping difference + quantiles
+        '''
+        self._mean={}
+        self._difference={}
+        for region in self._distributions.keys():
+            self._mean[region]={}
+            for period in self._periods:
+                # compute weighted mean for each period
+                self._mean[region][period]=np.sum(self._distributions[region][period]*self._distributions[region]['weight'])/np.sum(self._distributions[region]['weight'])
+
+            self._mean[region]['shuffled']=[]
+            for i in self._distributions[region]['shuffled'].keys():
+                # computed weighted mean for each shuffled sample
+                self._mean[region]['shuffled'].append(np.sum(self._distributions[region]['shuffled'][i]*self._distributions[region]['weight'])/np.sum(self._distributions[region]['weight']))
+
+            self._difference[region]={}
+            self._difference[region]['Recent-ref']=self._mean[region]['Recent']-self._mean[region]['ref']
+            self._difference[region]['quantiles']=[]
+            # compute quantiles for differences between ref and shuffled realizations
+            for qu in [1,5,10,25,50,75,90,95,99]:
+                self._difference[region]['quantiles'].append((qu,np.percentile(self._mean[region]['shuffled']-self._mean[region]['ref'],qu)))
 
     def ks_test(self):
         '''
@@ -207,14 +251,13 @@ class PDF_Processing(object):
         cutinterval: type tuple : Min/Max range for the PDF
         globaldist: type str : Kernel, default 'gaussian'. See R-function for update
         bw: type int : smoothing bandwidth to be used.
-        region: type str : Regional analysis. Currently global only. 
+        region: type str : Regional analysis. 
         '''
         if not os.path.exists(self._working_dir+'tmp/') :
             os.mkdir(self._working_dir+'tmp/')
 
         for key in self._periods:
             fstring=self._working_dir+'tmp/tmp_p_to_R.dat'
-            # print self._distributions[region][key].shape, self._distributions['weight'].shape,key
             out_to_r=np.vstack((self._distributions[region][key],self._distributions[region]['weight']))
             np.savetxt(fstring,out_to_r.transpose())        
             rsavestring=self._working_dir+'tmp/tmp_processed_R_to_p.dat'
@@ -241,26 +284,125 @@ class PDF_Processing(object):
         For further information on the method. 
         cutinterval: type tuple : Min/Max range for the PDF
         globaldist: type str : Kernel, default 'gaussian'. See R-function for update
-        bw: type int : smoothing bandwidth to be used.
-        region: type str : Regional analysis. Currently global only. 
+        bw: type int : smoothing bandwidth to be used. can be a scalar or method for estimation 'scott' or 'silverman'
+        region: type str : Regional analysis. 
         '''
         if not os.path.exists(self._working_dir+'tmp/') :
             os.mkdir(self._working_dir+'tmp/')
 
         for key in self._periods:
-            weights=self._distributions['weight']
+            weights=self._distributions[region]['weight']
+            # normailze weights
             weights=weights.copy()/sum(weights)
             kde=gaussian_kde(self._distributions[region][key],weights=weights)
             kde.set_bandwidth(bw_method=bw)
             pdf=np.zeros([512,2])
             pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
-            pdf_zwi=kde(pdf[:,0])
-            pdf_zwi2=pdf_zwi.copy()
-            pdf[:,1]=pdf_zwi/sum(pdf_zwi2)
+            pdf_zwi=kde.evaluate(pdf[:,0])
+            pdf[:,1]=pdf_zwi/sum(pdf_zwi)
             self._distributions[region][key+'_pdf']=pdf
             cdf=pdf.copy()
             cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
             self._distributions[region][key+'_cdf']=cdf
+
+
+    def show_maps(self,output_name):
+        '''
+        Creates map with information on grid-point level
+        '''
+        fig=plt.figure(figsize=(6,4))
+        m=Basemap(llcrnrlon=-180,urcrnrlon=180,llcrnrlat=-90,urcrnrlat=90,resolution="l",projection='cyl')
+        m.drawcoastlines()
+        Z=self._data['Recent']-self._data['ref']
+
+        # otherwise there is a bug, don't know how to fix this (this gridcell is on the edge)
+        Z[:,180]=np.nan
+        Zm=np.ma.masked_invalid(Z)
+
+        # lon and lat have to be meshgrid and they should indicate the edges of gridcells, not centers of grid cells
+        lon=self._data.lon.copy()
+        lon[lon>180]-=360
+        lon-=3.75/2
+        lon=np.append(lon,np.array(lon[-1]+3.75))
+
+        lat=self._data.lat.copy()
+        lat-=2.5/2
+        lat=np.append(lat,lat[-1]+2.5)
+
+        lons, lats = np.meshgrid(lon,lat)
+
+        im1 = m.pcolormesh(lons,lats,Zm,cmap='PiYG',vmin=-5,vmax=5)
+        fig.colorbar(im1,orientation='horizontal')
+
+        if output_name!=None:   plt.savefig(output_name)
+        if output_name==None:   plt.show()
+
+
+    def show_result(self,small_plot_function,srex_polygons,output_name):
+        '''
+        Creates world map with little subplots around it
+        Information about plot arrangement is stored in srex_polygons
+        The subplots will be filled with the input of small_plot_function
+        small_plot_functions can be defined outside of this class. the function name of the defined small_plot_function is given to show_results()
+        '''
+
+        # settings for big plot image
+        ratio=0.2
+        fig = plt.figure(figsize=(9,6))
+
+        # big plot window
+        ax_big=fig.add_axes([0,0,1,1])
+        ax_big.axis('off')
+
+        # map in the center of the big plot window (transparant background)
+        ax_map=fig.add_axes([ratio,ratio,1-2*ratio,1-2*ratio])
+        ax_map.patch.set_facecolor('None')
+        ax_map.axis('off')
+        m=Basemap(ax=ax_map)
+        m.drawcoastlines()
+
+        for region in self._masks.keys():
+            if region != 'global':
+                # plot the ploygon on the map
+                x,y=Polygon(srex_polygons[region]['points']).exterior.xy
+                m.plot(x,y,'g')
+                # add a point in the center of the region and a line pointing to the outersubplot
+                m.plot(np.mean(x),np.mean(y),'og')
+                ax_big.plot(srex_polygons[region]['line-out_plot'][0:2],srex_polygons[region]['line-out_plot'][2:4],'g')
+                # add the outer subplot
+                ax = fig.add_axes(srex_polygons[region]['out_plot'],axisbg='w') 
+                # fill the outer subplot with whatever is defined in small_plot_function
+                small_plot_function(subax=ax,region=region)
+
+        # add global subplot
+        ax = fig.add_axes([0.01,0.005,0.21,0.28],axisbg='w') 
+        small_plot_function(subax=ax,region='global')    
+        
+        ax_big.set_xlim([-200,200])
+        ax_big.set_ylim([-100,100])
+
+        if output_name!=None:   plt.savefig(output_name)
+        if output_name==None:   plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
