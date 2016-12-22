@@ -33,6 +33,7 @@ class PDF_Processing(object):
         '''
         self._var = variable_name
         self._working_dir = working_dir
+        self._masks={}
 
     def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None):
         '''
@@ -72,7 +73,8 @@ class PDF_Processing(object):
             lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
 
         maskout[mask]=lat_weight[mask]
-        self._masks={maskname:np.ma.masked_invalid(maskout)}
+        self._masks[maskname]=maskout#{maskname:np.ma.masked_invalid(maskout)}
+        self._data=input_data
 
 
 
@@ -184,10 +186,10 @@ class PDF_Processing(object):
 
         for period,pname in zip(target_periods,period_names):
             print pname,period
-            da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)
+            da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)#*self._masks[mask_for_ref_period]
         
-        self._data=da_time_sliced
-        self._periods=self._data.period
+        self._data_sliced=da_time_sliced
+        self._periods=self._data_sliced.period
 
 
     def derive_distributions(self,globaldist=True):
@@ -196,37 +198,87 @@ class PDF_Processing(object):
         globaldist: type Boolean : Flag whether or not regional distributions shall be derived
         '''
         self._distributions={}
-
-        # REGIONAL (SREX regions)
-        # mask grid-cells where no data exists in reference
-        # do we still need this nan filter??? isnt mask there for that?
-        nanfilter=np.isfinite(self._data['ref'].values.flatten())
         for region in self._masks.keys():
             self._distributions[region]={}
-            # use mask calculated in derive_regional_masking()
-            mask=np.isfinite(self._masks[region].flatten()[nanfilter])
-            self._distributions[region]['weight']=self._masks[region].flatten()[nanfilter][mask] 
+            m=self._masks[region]
+            self._distributions[region]['weight']=m[np.isfinite(m)].values.flatten()
             for key in self._periods:
-                t=self._data[key].values.flatten()
-                self._distributions[region][key]=t[nanfilter][mask]   
+                self._distributions[region][key]=self._data_sliced[key][np.isfinite(m)].values.flatten()
 
-    def bootstrapping(self,input_data,nShuff):
+    def derive_pdf_difference(self,ref_period,target_period,no_hist_bins=256,range_scaling_factor=0.5,absolute_scaling=False):
+          # derive histogram pdf for pairwise differences 
+            
+            for region in self._distributions.keys():
+                self._distributions[region]['pdf']={}
+                self._distributions[region]['cdf']={}
+                
+                # Set binning range for uniform analysis 
+                diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
+                
+                if absolute_scaling:
+                    bin_range=[-diff.max()*range_scaling_factor,(diff.max()+1)*range_scaling_factor]
+                else:
+                    bin_range=[diff.min()*range_scaling_factor,(diff.max()+1)*range_scaling_factor]
+                self._histogram_range=bin_range                
+                
+                der_hist=np.histogram(diff,no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)
+                
+                # bin x-axis is left-centered. Concert to centered 
+                self._distributions[region]['pdf']['xaxis']=np.asarray([(der_hist[1][i]+der_hist[1][i+1])/2 for i in xrange(len(der_hist[1])-1)])
+                self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
+                # save hist_values
+                normed_hist=der_hist[0]/der_hist[0].sum()
+                self._distributions[region]['pdf'][target_period+'_'+ref_period]=normed_hist
+                self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([normed_hist[:i].sum() for i in xrange(len(normed_hist))])
+
+    def bootstrapping(self,bs_range,nShuff):
         '''
         create shuffled time slices
         '''       
-
         for region in self._masks.keys():
-            input_data_masked=input_data
-            mask=np.isfinite(self._masks[region].flatten())
+            input_data_masked=self._data.copy()[bs_range[0]:bs_range[1]]            
+            mask=self._masks[region]
             self._distributions[region]['shuffled']={}
+            print input_data_masked
             for i in range(nShuff):
-                dat = input_data_masked[random.sample(self._timeaxis,20)]
-                mdat = np.ma.masked_array(dat,np.isnan(dat))
-                # input_sample is comparable to da_time_sliced
-                # .filled(np.nan) is required to maintain the same dimensions as ._distributions[region]['weight']
-                input_sample=np.mean(mdat,axis=0).filled(np.nan)
-                t=input_sample.flatten()
-                self._distributions[region]['shuffled'][i]=t[mask]              
+                dat = input_data_masked[random.sample(input_data_masked.year,20)].mean(axis=0)
+                mdat = dat[np.isfinite(mask)]
+                # np.ma.masked_array(dat,np.isnan(dat))
+                # # input_sample is comparable to da_time_sliced
+                # # .filled(np.nan) is required to maintain the same dimensions as ._distributions[region]['weight']
+                # input_sample=np.mean(mdat,axis=0).filled(np.nan)
+                # t=input_sample.flatten()
+                # self._distributions[region]['shuffled'][i]=t[mask]              
+                self._distributions[region]['shuffled'][i]=mdat.values.flatten()
+
+    def derive_bootstrapped_conf_interval(self,quantiles=[1,5,17,25,50,75,83,95,99]):
+          # derive confidence intervals for bootstrapped differences 
+
+            for region in self._distributions.keys():
+                if self._distributions[region].has_key('pdf')==False:
+                    print 'Xrange not defined, run derive_pdf_difference first'
+                    break 
+                else:
+                    self._distributions[region]['pdf']['bs_quantiles']={}
+                    self._distributions[region]['cdf']['bs_quantiles']={}
+                    bs_set= self._distributions[region]['shuffled']
+                    bs_length=len(bs_set.keys())
+                    no_hist_bins=len(self._distributions[region]['pdf']['xaxis'])
+                    bs_matrix=np.zeros((no_hist_bins,bs_length*(bs_length-1)))
+
+                    index=0
+                    for i,j in itertools.product(xrange(bs_length),xrange(bs_length)):
+                        if i != j:                           
+                            hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]           
+                            bs_matrix[:,index]=hist_der/hist_der.sum()
+                            index+=1
+
+                    for qu in quantiles:
+                        quant=np.percentile(bs_matrix,qu,axis=1)
+                        self._distributions[region]['pdf']['bs_quantiles'][qu]=quant
+                        self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
+
+
 
     def simple_difference(self,period_name_1,period_name_2):
         '''
@@ -338,33 +390,40 @@ class PDF_Processing(object):
                 for qu in quantiles:
                     self._quantiles[region][period][qu]=self._distributions[region][period+'_cdf'][np.argmin(abs(self._distributions[region][period+'_cdf'][:,1]-qu)),0]
 
-    def show_maps(self,output_name,period_name_1,period_name_2):
+    def show_maps(self,output_name,period_name_1,period_name_2,fig_size=(10,7),centering=True):
         '''
         Creates map with information on grid-point level
         '''
-        fig=plt.figure(figsize=(6,4))
+        fig=plt.figure(figsize=fig_size)
         m=Basemap(llcrnrlon=-180,urcrnrlon=180,llcrnrlat=-90,urcrnrlat=90,resolution="l",projection='cyl')
         m.drawcoastlines()
-        Z=self._data[period_name_2]-self._data[period_name_1]
+        Z=self._data_sliced[period_name_2]-self._data_sliced[period_name_1]
 
         # otherwise there is a bug, don't know how to fix this (this gridcell is on the edge)
         Z[:,180]=np.nan
         Zm=np.ma.masked_invalid(Z)
 
         # lon and lat have to be meshgrid and they should indicate the edges of gridcells, not centers of grid cells
-        lon=self._data.lon.copy()
+        lon=self._data_sliced.lon.copy()
         lon[lon>180]-=360
         lon-=3.75/2
         lon=np.append(lon,np.array(lon[-1]+3.75))
 
-        lat=self._data.lat.copy()
+        lat=self._data_sliced.lat.copy()
         lat-=2.5/2
         lat=np.append(lat,lat[-1]+2.5)
 
         lons, lats = np.meshgrid(lon,lat)
-
-        im1 = m.pcolormesh(lons,lats,Zm,cmap='PiYG',vmin=-5,vmax=5)
-        fig.colorbar(im1,orientation='horizontal')
+        # plmin=Zm.min()
+        # plmax=Zm.max()
+        plstd=Zm.std()
+        if centering:
+            # print plmin,plmax
+            im1 = m.pcolormesh(lons,lats,Zm,cmap='PiYG',vmin=-2*plstd,vmax=2*plstd)
+        else:
+            plmax=Zm.max()
+            im1 = m.pcolormesh(lons,lats,Zm,cmap='OrRd',vmin=0,vmax=0.8*plmax)
+        fig.colorbar(im1,orientation='horizontal',label=self._var)
 
         if output_name!=None:   plt.savefig(output_name)
         if output_name==None:   plt.show()
@@ -416,7 +475,7 @@ class PDF_Processing(object):
         if output_name!=None:   plt.savefig(output_name)
         if output_name==None:   plt.show()
 
-
+    # def save_output(self,fname):
 
 
 
