@@ -205,7 +205,11 @@ class PDF_Processing(object):
             for key in self._periods:
                 self._distributions[region][key]=self._data_sliced[key][np.isfinite(m)].values.flatten()
 
+<<<<<<< HEAD
     def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',no_hist_bins=256,range_scaling_factor=0.5,absolute_scaling=False):
+=======
+    def derive_pdf_difference(self,ref_period,target_period,no_hist_bins=256,range_scaling_factor=0.5,absolute_scaling=False):
+>>>>>>> 88539d23216a74cab452a38cda8704244040eb40
           # derive histogram pdf for pairwise differences 
             
             for region in self._distributions.keys():
@@ -221,6 +225,7 @@ class PDF_Processing(object):
                     bin_range=[diff.min()*range_scaling_factor,(diff.max()+1)*range_scaling_factor]
                 self._histogram_range=bin_range                
                 
+<<<<<<< HEAD
                 if pdf_method=='python_silverman':
                     pdf_der=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
                     # print pdf_der[:10,:]
@@ -246,6 +251,17 @@ class PDF_Processing(object):
                     break
                 
     
+=======
+                der_hist=np.histogram(diff,no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)
+                
+                # bin x-axis is left-centered. Concert to centered 
+                self._distributions[region]['pdf']['xaxis']=np.asarray([(der_hist[1][i]+der_hist[1][i+1])/2 for i in xrange(len(der_hist[1])-1)])
+                self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
+                # save hist_values
+                normed_hist=der_hist[0]/der_hist[0].sum()
+                self._distributions[region]['pdf'][target_period+'_'+ref_period]=normed_hist
+                self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([normed_hist[:i].sum() for i in xrange(len(normed_hist))])
+>>>>>>> 88539d23216a74cab452a38cda8704244040eb40
 
     def bootstrapping(self,bs_range,nShuff):
         '''
@@ -267,6 +283,7 @@ class PDF_Processing(object):
                 # self._distributions[region]['shuffled'][i]=t[mask]              
                 self._distributions[region]['shuffled'][i]=mdat.values.flatten()
 
+<<<<<<< HEAD
     def derive_bootstrapped_conf_interval(self,pdf_method='python_silverman',quantiles=[1,5,17,25,50,75,83,95,99]):
         '''
         # derive confidence intervals for bootstrapped differences 
@@ -305,6 +322,34 @@ class PDF_Processing(object):
 
                     self._distributions[region]['pdf']['bs_quantiles'][qu]=quant
                     self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
+=======
+    def derive_bootstrapped_conf_interval(self,quantiles=[1,5,17,25,50,75,83,95,99]):
+          # derive confidence intervals for bootstrapped differences 
+
+            for region in self._distributions.keys():
+                if self._distributions[region].has_key('pdf')==False:
+                    print 'Xrange not defined, run derive_pdf_difference first'
+                    break 
+                else:
+                    self._distributions[region]['pdf']['bs_quantiles']={}
+                    self._distributions[region]['cdf']['bs_quantiles']={}
+                    bs_set= self._distributions[region]['shuffled']
+                    bs_length=len(bs_set.keys())
+                    no_hist_bins=len(self._distributions[region]['pdf']['xaxis'])
+                    bs_matrix=np.zeros((no_hist_bins,bs_length*(bs_length-1)))
+
+                    index=0
+                    for i,j in itertools.product(xrange(bs_length),xrange(bs_length)):
+                        if i != j:                           
+                            hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]           
+                            bs_matrix[:,index]=hist_der/hist_der.sum()
+                            index+=1
+
+                    for qu in quantiles:
+                        quant=np.percentile(bs_matrix,qu,axis=1)
+                        self._distributions[region]['pdf']['bs_quantiles'][qu]=quant
+                        self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
+>>>>>>> 88539d23216a74cab452a38cda8704244040eb40
 
 
 
