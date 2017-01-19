@@ -224,7 +224,8 @@ class PDF_Processing(object):
                 
 
                 if pdf_method=='python_silverman':
-                    pdf_der=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
+                    pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
+                    print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
                     # print pdf_der[:10,:]
                     # bin x-axis is left-centered. Concert to centered 
                     self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]#np.asarray([(pdf_der[i,0]+pdf_der[i+1,0])/2 for i in xrange(len(pdf_der[:,0])-1)])
@@ -256,7 +257,7 @@ class PDF_Processing(object):
             input_data_masked=self._data.copy()[bs_range[0]:bs_range[1]]            
             mask=self._masks[region]
             self._distributions[region]['shuffled']={}
-            print input_data_masked
+            #print input_data_masked
             for i in range(nShuff):
                 dat = input_data_masked[random.sample(input_data_masked.year,20)].mean(axis=0)
                 mdat = dat[np.isfinite(mask)]
@@ -288,18 +289,22 @@ class PDF_Processing(object):
                 bs_matrix=np.zeros((no_hist_bins,bs_length*(bs_length-1)))
 
                 index=0
+                tot_no_nans=0
                 for i,j in itertools.product(xrange(bs_length),xrange(bs_length)):
                     if i != j:                           
                         # hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]           
                         diff=bs_set[i]-bs_set[j]
                         if pdf_method=='python_silverman':
-                            hist_der=self.kernel_density_estimation(diff,self._histogram_range,bw='silverman',kern='gaussian',region='global',method='python')
+                            hist_der,no_nans=self.kernel_density_estimation(diff,self._histogram_range,bw='silverman',kern='gaussian',region='global',method='python')
+                            tot_no_nans+=no_nans
                             bs_matrix[:,index]=hist_der[:,1]#/hist_der.sum()
                         elif pdf_method=='hist':
                             hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]           
                             bs_matrix[:,index]=hist_der/hist_der.sum()
 
                         index+=1
+
+                print 'Warning, total number of NaNs in bootstrap kernel estimation. No of NaNs:',tot_no_nans
 
                 for qu in quantiles:
                     quant_unnormed=np.percentile(bs_matrix,qu,axis=1)
@@ -367,15 +372,13 @@ class PDF_Processing(object):
             weights=weights.copy()/sum(weights)
             diff_nan_filter=np.isfinite(diff)
             no_nans=np.isfinite(diff).sum()-len(diff)
-            if no_nans<0:
-                print 'Warning, NaNs in bootstrap kernel estimation. No of NaNs: ', no_nans
             kde=gaussian_kde(diff[diff_nan_filter],weights=weights[diff_nan_filter])
             kde.set_bandwidth(bw_method=bw)
             pdf=np.zeros([512,2])
             pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
             pdf_zwi=kde.evaluate(pdf[:,0])
             pdf[:,1]=pdf_zwi/sum(pdf_zwi)
-            return pdf
+            return pdf,no_nans
             # self._distributions[region][key+'_pdf']=pdf
                 # cdf=pdf.copy()
                 # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
