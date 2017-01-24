@@ -214,7 +214,7 @@ class PDF_Processing(object):
             for key in self._periods:
                 self._distributions[region][key]=self._data_sliced[key][np.isfinite(m)].values.flatten()
 
-    def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',no_hist_bins=256,range_scaling_factor=0.5,bin_range=None,absolute_scaling=False,relative_diff=False):
+    def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',no_hist_bins=256,range_scaling_factor=1,bin_range=None,absolute_scaling=False,relative_diff=False):
 
           # derive histogram pdf for pairwise differences 
             
@@ -231,9 +231,9 @@ class PDF_Processing(object):
                 # Set binning range for uniform analysis
                 if bin_range==None:
                     if absolute_scaling:
-                        bin_range=[-diff.max()*range_scaling_factor,(diff.max()+1)*range_scaling_factor]
+                        bin_range=[-diff.max()*range_scaling_factor,diff.max()*range_scaling_factor]
                     else:
-                        bin_range=[diff.min()*range_scaling_factor,(diff.max()+1)*range_scaling_factor]
+                        bin_range=[diff.min()*range_scaling_factor,diff.max()*range_scaling_factor]
                 self._histogram_range=bin_range                
                 
 
@@ -405,12 +405,13 @@ class PDF_Processing(object):
             pdf[:,1]=pdf_zwi/sum(pdf_zwi)
             return pdf,no_nans
             # self._distributions[region][key+'_pdf']=pdf
-                # cdf=pdf.copy()
-                # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
-                # self._distributions[region][key+'_cdf']=cdf
+            # cdf=pdf.copy()
+            # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
+            # self._distributions[region][key+'_cdf']=cdf
 
         if method=='R':      
             '''
+            Still not the same as python method
             See https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
             For further information on the method. 
             '''
@@ -452,43 +453,6 @@ class PDF_Processing(object):
                 for qu in quantiles:
                     self._quantiles[region][period][qu]=self._distributions[region][period+'_cdf'][np.argmin(abs(self._distributions[region][period+'_cdf'][:,1]-qu)),0]
 
-    def plot_diff_old(self,output_name,period_name_1,period_name_2,fig_size=(10,7),centering=True):
-        '''
-        Creates map with information on grid-point level
-        '''
-        fig=plt.figure(figsize=fig_size)
-        m=Basemap(llcrnrlon=-180,urcrnrlon=180,llcrnrlat=-90,urcrnrlat=90,resolution="l",projection='cyl')
-        m.drawcoastlines()
-        Z=self._data_sliced[period_name_2]-self._data_sliced[period_name_1]
-
-        # otherwise there is a bug, don't know how to fix this (this gridcell is on the edge)
-        Z[:,180]=np.nan
-        Zm=np.ma.masked_invalid(Z)
-
-        # lon and lat have to be meshgrid and they should indicate the edges of gridcells, not centers of grid cells
-        lon=self._data_sliced.lon.copy()
-        lon[lon>180]-=360
-        lon-=3.75/2
-        lon=np.append(lon,np.array(lon[-1]+3.75))
-
-        lat=self._data_sliced.lat.copy()
-        lat-=2.5/2
-        lat=np.append(lat,lat[-1]+2.5)
-
-        lons, lats = np.meshgrid(lon,lat)
-        # plmin=Zm.min()
-        # plmax=Zm.max()
-        plstd=Zm.std()
-        if centering:
-            # print plmin,plmax
-            im1 = m.pcolormesh(lons,lats,Zm,cmap='PiYG',vmin=-2*plstd,vmax=2*plstd)
-        else:
-            plmax=Zm.max()
-            im1 = m.pcolormesh(lons,lats,Zm,cmap='OrRd',vmin=0,vmax=0.8*plmax)
-        fig.colorbar(im1,orientation='horizontal',label=self._var)
-
-        if output_name!=None:   plt.savefig(output_name)
-        if output_name==None:   plt.show()
 
     def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,limits=None,ax=None,out_file=None,title='',show=True):
         '''
@@ -537,12 +501,12 @@ class PDF_Processing(object):
         if color_range==None:
             color_range=[np.min(to_plot[np.isfinite(to_plot)]),np.max(to_plot[np.isfinite(to_plot)])]
 
-        im = m.imshow(to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1],interpolation='none')
-
         # show coastlines and borders
         m.drawcoastlines()
-        m.drawstates()
-        m.drawcountries()
+        #m.drawstates()
+        #m.drawcountries()
+
+        im = m.imshow(to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1],interpolation='none')
 
         # add colorbar
         if color_bar==True:
@@ -553,7 +517,7 @@ class PDF_Processing(object):
         ax.legend(loc='best')
         
         if out_file==None and show==True:plt.show()
-        if out_file!=None:plt.savefig(out_file)
+        if out_file!=None:plt.tight_layout() ; plt.savefig(out_file) ; plt.clf()
         return(im)
 
 
