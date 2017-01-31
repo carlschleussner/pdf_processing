@@ -35,7 +35,7 @@ class PDF_Processing(object):
         self._working_dir = working_dir
         self._masks={}
 
-    def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None):
+    def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None,required_coverage=None,dataset=''):
         '''
         Grid cell level averaging for different periods along time axis        
         input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
@@ -45,38 +45,81 @@ class PDF_Processing(object):
         target_periods: Target period. Only relevant if  check_ref_period_only== True
         Generates data_frame mask 
         '''    
-        if  check_ref_period_only:
-            mask=np.isfinite(input_data[ref_period[0]])
-            print 'No of non-NAN grid cells in Reference Mask: ', np.sum(mask)
-
-        else:
-            mask=np.isfinite(input_data[ref_period[0]:ref_period[1]].mean(axis=0))
-            print 'No of non-NAN grid cells in Mask over Ref period: ', np.sum(mask)            
-            for tp in target_periods:
-                mask*=np.isfinite(input_data[tp[0]:tp[1]].mean(axis=0))
-                print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
-
-        try:
-            landmask[landmask!=0]=1
-            landmask[landmask==0]=np.nan
-            mask*=np.isfinite(landmask)
-        except:
-            print 'no landmask used'
-
-
-        maskout=input_data[ref_period[0]].copy()
-        maskout[:,:]=np.NaN
-
-        # Derive distribution weight (For kernel estimation)
-        lat_weight=input_data[ref_period[0]].copy()
-        for l in lat_weight.lon:
-            lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
-
-        maskout[mask]=lat_weight[mask]
-        self._masks[maskname]=maskout/float(maskout[mask].sum())           #{maskname:np.ma.masked_invalid(maskout)}
+        lat=input_data.lat
+        lon=input_data.lon
         self._data=input_data
 
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.pkl'
 
+        if os.path.isfile(mask_file):
+            # load existing mask
+            pkl_file = open(mask_file, 'rb')
+            self._masks = pickle.load(pkl_file)
+            pkl_file.close()   
+
+        else:
+            # clean plz
+            if required_coverage==None:
+                if  check_ref_period_only:
+                    mask=np.isfinite(input_data[ref_period[0]:ref_period[1]].mean(axis=0))
+                    print 'No of non-NAN grid cells in Reference Mask: ', np.sum(mask)
+
+                else:
+                    mask=np.isfinite(input_data[ref_period[0]:ref_period[1]].mean(axis=0))
+                    print 'No of non-NAN grid cells in Mask over Ref period: ', np.sum(mask)            
+                    for tp in target_periods:
+                        mask*=np.isfinite(input_data[tp[0]:tp[1]].mean(axis=0))
+                        print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
+
+            if required_coverage!=None:
+                mask=input_data[ref_period[0]].copy()
+                mask[:,:]=1
+                if  check_ref_period_only:
+                    for y in lat:   
+                        for x in lon:
+                            print np.where(np.isfinite(input_data[ref_period[0]:ref_period[1],y,x]))[0]
+                            if len(np.where(np.isfinite(input_data[ref_period[0]:ref_period[1],y,x]))[0])<input_data[ref_period[0]:ref_period[1],y,x].shape[0]*required_coverage:
+                                mask[y,x]=0
+                    print 'No of non-NAN grid cells in Reference Mask: ', np.sum(mask)
+
+                else:
+                    for y in lat:
+                        for x in lon:
+                            if len(np.where(np.isfinite(input_data[ref_period[0]:ref_period[1],y,x]))[0])<input_data[ref_period[0]:ref_period[1],y,x].shape[0]*required_coverage:
+                                mask[y,x]=0
+                    print 'No of non-NAN grid cells in Mask over Ref period: ', np.sum(mask)            
+                    for tp in target_periods:
+                        for y in lat:
+                            for x in lon:
+                                if len(np.where(np.isfinite(input_data[tp[0]:tp[1],y,x]))[0])<input_data[tp[0]:tp[1],y,x].shape[0]*required_coverage:
+                                    mask[y,x]=0
+                        print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
+
+            mask[mask==0]=np.nan
+            mask=np.isfinite(mask)      
+
+            try:
+                landmask[landmask!=0]=1
+                landmask[landmask==0]=np.nan
+                mask*=np.isfinite(landmask)
+            except:
+                print 'no landmask used'
+
+
+            maskout=input_data[ref_period[0]].copy()*np.nan
+
+            # Derive distribution weight (For kernel estimation)
+            lat_weight=input_data[ref_period[0]].copy()
+            for l in lat_weight.lon:
+                lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
+
+
+            maskout[mask]=lat_weight[mask]
+            self._masks[maskname]=maskout/float(maskout[mask].sum())           #{maskname:np.ma.masked_invalid(maskout)}
+
+            mask_output = open(mask_file, 'wb')
+            pickle.dump(self._masks, mask_output)
+            mask_output.close()
 
     def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
         '''
@@ -195,7 +238,9 @@ class PDF_Processing(object):
             print pname,period
             # why was this commented????
             #da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)#*self._masks[mask_for_ref_period]
-            da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)#*self._masks[mask_for_ref_period]
+
+            # there are nans in the period now!!!
+            da_time_sliced[pname]=np.nanmean(np.array(input_data_masked[period[0]:period[1]]),axis=0)#*self._masks[mask_for_ref_period]
         
         self._data_sliced=da_time_sliced
         self._periods=self._data_sliced.period
@@ -273,15 +318,11 @@ class PDF_Processing(object):
             self._distributions[region]['shuffled']={}
             #print input_data_masked
             for i in range(nShuff):
-                dat = input_data_masked[random.sample(input_data_masked.year,20)].mean(axis=0)
-                mdat = dat[np.isfinite(mask)]
-                # np.ma.masked_array(dat,np.isnan(dat))
-                # # input_sample is comparable to da_time_sliced
-                # # .filled(np.nan) is required to maintain the same dimensions as ._distributions[region]['weight']
-                # input_sample=np.mean(mdat,axis=0).filled(np.nan)
-                # t=input_sample.flatten()
-                # self._distributions[region]['shuffled'][i]=t[mask]              
-                self._distributions[region]['shuffled'][i]=mdat.values.flatten()
+
+                # ignore nans!!
+                dat = np.nanmean(input_data_masked[random.sample(input_data_masked.year,20)],axis=0).flatten()
+                mdat = dat[np.where(np.isfinite(mask.flatten()))[0]]
+                self._distributions[region]['shuffled'][i]=mdat
 
 
     def derive_bootstrapped_conf_interval(self,pdf_method='python_silverman',quantiles=[1,5,17,25,50,75,83,95,99],relative_diff=False):
@@ -334,31 +375,6 @@ class PDF_Processing(object):
                     self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
 
 
-    def simple_difference(self,period_name_1,period_name_2):
-        '''
-        Get the difference in index between
-        Bootstrapping difference + quantiles
-        '''
-        self._mean={}
-        self._difference={}
-        for region in self._distributions.keys():
-            self._mean[region]={}
-            for period in self._periods:
-                # compute weighted mean for each period
-                self._mean[region][period]=np.sum(self._distributions[region][period]*self._distributions[region]['weight'])/np.sum(self._distributions[region]['weight'])
-
-            self._mean[region]['shuffled']=[]
-            for i in self._distributions[region]['shuffled'].keys():
-                # computed weighted mean for each shuffled sample
-                self._mean[region]['shuffled'].append(np.sum(self._distributions[region]['shuffled'][i]*self._distributions[region]['weight'])/np.sum(self._distributions[region]['weight']))
-
-            self._difference[region]={}
-            self._difference[region][period_name_2+'-'+period_name_1]=self._mean[region][period_name_2]-self._mean[region][period_name_1]
-            self._difference[region]['quantiles']=[]
-            # compute quantiles for differences between ref and shuffled realizations
-            for qu in [1,5,10,25,50,75,90,95,99]:
-                self._difference[region]['quantiles'].append((qu,np.percentile(self._mean[region]['shuffled']-self._mean[region][period_name_1],qu)))
-
     def ks_test(self,period_name_1,period_name_2):
         '''
         2-sample KS test. Comparing distributions for 'ref' and 'recent'
@@ -379,6 +395,35 @@ class PDF_Processing(object):
         region: type str : Regional analysis. 
         method: type function name : name of the function below that has to be used. default is python
         '''
+
+        # if method=='python':      
+        #     '''
+        #     See https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
+        #     For further information on the method. 
+        #     '''
+        #     # passor key in self._periods:
+        #     weights=self._distributions[region]['weight']
+        #     # normailze weights
+        #     weights=weights.copy()/sum(weights)
+
+        #     # filter nans
+        #     diff_nan_filter=np.isfinite(diff)
+        #     no_nans=np.isfinite(diff).sum()-len(diff)
+
+        #     # cutoff outliers
+        #     inside_cutinterval=np.where((diff>=cutinterval[0]) & (diff<=cutinterval[1]))[0]
+
+        #     kde=gaussian_kde(diff[inside_cutinterval],weights=weights[inside_cutinterval])
+        #     kde.set_bandwidth(bw_method=bw)
+        #     pdf=np.zeros([512,2])
+        #     pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
+        #     pdf_zwi=kde.evaluate(pdf[:,0])
+        #     pdf[:,1]=pdf_zwi/sum(pdf_zwi)
+        #     return pdf,no_nans
+        #     # self._distributions[region][key+'_pdf']=pdf
+        #     # cdf=pdf.copy()
+        #     # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
+        #     # self._distributions[region][key+'_cdf']=cdf
 
         if method=='python':      
             '''
@@ -454,7 +499,7 @@ class PDF_Processing(object):
                     self._quantiles[region][period][qu]=self._distributions[region][period+'_cdf'][np.argmin(abs(self._distributions[region][period+'_cdf'][:,1]-qu)),0]
 
 
-    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,limits=None,ax=None,out_file=None,title='',show=True):
+    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,limits=[-180,180,-90,90],ax=None,figsize=(8,4),coastline_width=0.5,out_file=None,title='',show=True):
         '''
         plot maps of data. 
         meta_data: list of strs: meta information required to acces data
@@ -477,7 +522,7 @@ class PDF_Processing(object):
         to_plot=np.array(to_plot)
 
         if ax==None:
-            fig, ax = plt.subplots(nrows=1, ncols=1,figsize=(6,4))      
+            fig, ax = plt.subplots(nrows=1, ncols=1,figsize=figsize)      
 
         # handle 0 to 360 lon
         if max(lon)>180:
@@ -487,26 +532,30 @@ class PDF_Processing(object):
             lon=lon[new_order]
             lon[lon>180]-=360
 
-        # imshow does not support decreasing lat or lon
+
         to_plot=np.ma.masked_invalid(to_plot)
-        if lat[0]>lat[1]:to_plot=to_plot[::-1,:]
-        if lon[0]>lon[1]:to_plot=to_plot[:,::-1]
 
-
-        m = Basemap(ax=ax,llcrnrlon=-180,urcrnrlon=180,llcrnrlat=-90,urcrnrlat=90,resolution="l",projection='cyl')
+        m = Basemap(ax=ax,llcrnrlon=limits[0],urcrnrlon=limits[1],llcrnrlat=limits[2],urcrnrlat=limits[3],resolution="l",projection='cyl')
         m.drawmapboundary(fill_color='1.')
 
+        # show coastlines and borders
+        m.drawcoastlines(linewidth=coastline_width)
+        #m.drawstates()
+        #m.drawcountries()
+        m.drawparallels(np.arange(-60,100,30),labels=[0,0,0,0],color='grey',linewidth=0.5) 
+        m.drawmeridians([-120,0,120],labels=[0,0,0,0],color='grey',linewidth=0.5)
 
         # get color_range
         if color_range==None:
             color_range=[np.min(to_plot[np.isfinite(to_plot)]),np.max(to_plot[np.isfinite(to_plot)])]
 
-        # show coastlines and borders
-        m.drawcoastlines()
-        #m.drawstates()
-        #m.drawcountries()
+        # when saving files as pdf interpolation='none' is not working!
+        #im = m.imshow(to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1],interpolation='nearest')
 
-        im = m.imshow(to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1],interpolation='none')
+        lon-=np.diff(lon,1)[0]/2.
+        lat-=np.diff(lat,1)[0]/2.
+        lon,lat=np.meshgrid(lon,lat)
+        im = m.pcolormesh(lon,lat,to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1])
 
         # add colorbar
         if color_bar==True:
