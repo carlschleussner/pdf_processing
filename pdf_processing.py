@@ -115,7 +115,7 @@ class PDF_Processing(object):
 
 
             maskout[mask]=lat_weight[mask]
-            self._masks[maskname]=maskout/float(maskout[mask].sum())           #{maskname:np.ma.masked_invalid(maskout)}
+            self._masks[maskname]=maskout/float(maskout[mask].sum())
 
             mask_output = open(mask_file, 'wb')
             pickle.dump(self._masks, mask_output)
@@ -228,7 +228,6 @@ class PDF_Processing(object):
         input_data_masked=input_data#*self._masks['global']
 
         # Derive time slices
-        # period_names.append('ref')
         da_time_sliced=da.DimArray(axes=[np.asarray(period_names), input_data_masked.lat, input_data_masked.lon],dims=['period', 'lat', 'lon'] )        
         
         # included in the next step??
@@ -261,51 +260,49 @@ class PDF_Processing(object):
 
     def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',no_hist_bins=256,range_scaling_factor=1,bin_range=None,absolute_scaling=False,relative_diff=False):
 
-          # derive histogram pdf for pairwise differences 
+        # derive histogram pdf for pairwise differences  
+        for region in self._distributions.keys():
+            self._distributions[region]['pdf']={}
+            self._distributions[region]['cdf']={}
             
-            for region in self._distributions.keys():
-                self._distributions[region]['pdf']={}
-                self._distributions[region]['cdf']={}
-                
-                 # get diff, relative diff is posible (in %)
-                if relative_diff==False:
-                    diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
-                if relative_diff==True:
-                    diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
+             # get diff, relative diff is posible (in %)
+            if relative_diff==False:
+                diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
+            if relative_diff==True:
+                diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
 
-                # Set binning range for uniform analysis
-                if bin_range==None:
-                    if absolute_scaling:
-                        bin_range=[-diff.max()*range_scaling_factor,diff.max()*range_scaling_factor]
-                    else:
-                        bin_range=[diff.min()*range_scaling_factor,diff.max()*range_scaling_factor]
-                self._histogram_range=bin_range                
-                
-
-                if pdf_method=='python_silverman':
-                    pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
-                    print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
-                    # print pdf_der[:10,:]
-                    # bin x-axis is left-centered. Concert to centered 
-                    self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]#np.asarray([(pdf_der[i,0]+pdf_der[i+1,0])/2 for i in xrange(len(pdf_der[:,0])-1)])
-                    self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
-                    # save hist_values
-                    self._distributions[region]['pdf'][target_period+'_'+ref_period]=pdf_der[:,1]
-                    self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([pdf_der[:i,1].sum() for i in xrange(len(pdf_der[:,1]))])
-            
-                elif pdf_method=='hist':
-                    der_hist=np.histogram(diff,no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)
-                    # bin x-axis is left-centered. Concert to centered 
-                    self._distributions[region]['pdf']['xaxis']=np.asarray([(der_hist[1][i]+der_hist[1][i+1])/2 for i in xrange(len(der_hist[1])-1)])
-                    self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
-                    # save hist_values
-                    normed_hist=der_hist[0]/der_hist[0].sum()
-                    self._distributions[region]['pdf'][target_period+'_'+ref_period]=normed_hist
-                    self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([normed_hist[:i].sum() for i in xrange(len(normed_hist))])
-
+            # Set binning range for uniform analysis
+            if bin_range==None:
+                if absolute_scaling:
+                    bin_range=[-diff.max()*range_scaling_factor,diff.max()*range_scaling_factor]
                 else:
-                    print 'Method not implemented', pdf_method
-                    break
+                    bin_range=[diff.min()*range_scaling_factor,diff.max()*range_scaling_factor]
+            self._histogram_range=bin_range                
+            
+
+            if pdf_method=='python_silverman':
+                pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
+                print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
+                # bin x-axis is left-centered. Concert to centered 
+                self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]#np.asarray([(pdf_der[i,0]+pdf_der[i+1,0])/2 for i in xrange(len(pdf_der[:,0])-1)])
+                self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
+                # save hist_values
+                self._distributions[region]['pdf'][target_period+'_'+ref_period]=pdf_der[:,1]
+                self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([pdf_der[:i,1].sum() for i in xrange(len(pdf_der[:,1]))])
+        
+            elif pdf_method=='hist':
+                der_hist=np.histogram(diff,no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)
+                # bin x-axis is left-centered. Concert to centered 
+                self._distributions[region]['pdf']['xaxis']=np.asarray([(der_hist[1][i]+der_hist[1][i+1])/2 for i in xrange(len(der_hist[1])-1)])
+                self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
+                # save hist_values
+                normed_hist=der_hist[0]/der_hist[0].sum()
+                self._distributions[region]['pdf'][target_period+'_'+ref_period]=normed_hist
+                self._distributions[region]['cdf'][target_period+'_'+ref_period]=np.asarray([normed_hist[:i].sum() for i in xrange(len(normed_hist))])
+
+            else:
+                print 'Method not implemented', pdf_method
+                break
                 
 
     def bootstrapping(self,bs_range,nShuff):
@@ -318,7 +315,6 @@ class PDF_Processing(object):
             self._distributions[region]['shuffled']={}
             #print input_data_masked
             for i in range(nShuff):
-
                 # ignore nans!!
                 dat = np.nanmean(input_data_masked[random.sample(input_data_masked.year,20)],axis=0).flatten()
                 mdat = dat[np.where(np.isfinite(mask.flatten()))[0]]
