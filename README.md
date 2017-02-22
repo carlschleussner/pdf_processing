@@ -18,3 +18,5 @@ carl.schleussner@climateanalytics.org
         - SREX, Hemispheric and regionally resolved output 
         - Derive pdfs over periods and regional aggregation
         - Bootstrapping method for confidence intervals
+
+The used weighted kernel density estimation function can be found here: https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
