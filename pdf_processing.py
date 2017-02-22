@@ -129,7 +129,7 @@ class PDF_Processing(object):
             pickle.dump(self._masks, mask_output)
             mask_output.close()
 
-def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
+    def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
         '''
         Derive regional masks
         The resulting masks can directly taken as weights for the distribution analysis. 
@@ -205,7 +205,6 @@ def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='
             mask_output = open(mask_file, 'wb')
             pickle.dump(self._masks, mask_output)
             mask_output.close()
-
 
 
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
