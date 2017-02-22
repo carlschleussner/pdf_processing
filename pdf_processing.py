@@ -43,6 +43,9 @@ class PDF_Processing(object):
         maskname:type list : generates mask for start of reference period. Default: 'global' for first year of reference period        
         check_ref_period_only: For observations, data gaps may exist also for the reference period. False: All years investigated will be checked. 
         target_periods: Target period. Only relevant if  check_ref_period_only== True
+        landmasl: np.array on lat-lon grid with 0 for ocean: This mask can be used to ignore ocean cells
+        required_coverage: None or float(0-1): if None: no missings allowed. If float: ratio odf missing values per grid-cell allowed
+        dataset: string: given name of the dataset
         Generates data_frame mask 
         '''    
         lat=input_data.lat
@@ -51,14 +54,16 @@ class PDF_Processing(object):
 
         mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.pkl'
 
+        # try to load existing mask
         if os.path.isfile(mask_file):
-            # load existing mask
             pkl_file = open(mask_file, 'rb')
             self._masks = pickle.load(pkl_file)
             pkl_file.close()   
 
+        # compute mask if no mask file found
         else:
-            # clean plz
+            # full coverage
+            # no missing values allowed
             if required_coverage==None:
                 if  check_ref_period_only:
                     mask=np.isfinite(input_data[ref_period[0]:ref_period[1]].mean(axis=0))
@@ -71,13 +76,14 @@ class PDF_Processing(object):
                         mask*=np.isfinite(input_data[tp[0]:tp[1]].mean(axis=0))
                         print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
 
+            # percentage coverage
+            # ratio of not missing values per grid-cell has to be larger than required_coverage
             if required_coverage!=None:
                 mask=input_data[ref_period[0]].copy()
                 mask[:,:]=1
                 if  check_ref_period_only:
                     for y in lat:   
                         for x in lon:
-                            print np.where(np.isfinite(input_data[ref_period[0]:ref_period[1],y,x]))[0]
                             if len(np.where(np.isfinite(input_data[ref_period[0]:ref_period[1],y,x]))[0])<input_data[ref_period[0]:ref_period[1],y,x].shape[0]*required_coverage:
                                 mask[y,x]=0
                     print 'No of non-NAN grid cells in Reference Mask: ', np.sum(mask)
@@ -98,6 +104,7 @@ class PDF_Processing(object):
             mask[mask==0]=np.nan
             mask=np.isfinite(mask)      
 
+            # mask ocean cells
             try:
                 landmask[landmask!=0]=1
                 landmask[landmask==0]=np.nan
@@ -108,15 +115,16 @@ class PDF_Processing(object):
 
             maskout=input_data[ref_period[0]].copy()*np.nan
 
-            # Derive distribution weight (For kernel estimation)
+            # Derive land area weighting (For kernel estimation)
             lat_weight=input_data[ref_period[0]].copy()
             for l in lat_weight.lon:
                 lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
 
-
             maskout[mask]=lat_weight[mask]
+            # normalize 
             self._masks[maskname]=maskout/float(maskout[mask].sum())
 
+            # save masks
             mask_output = open(mask_file, 'wb')
             pickle.dump(self._masks, mask_output)
             mask_output.close()
@@ -125,16 +133,15 @@ class PDF_Processing(object):
         '''
         Derive regional masks
         The resulting masks can directly taken as weights for the distribution analysis. 
-        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
         shift_lon:type float: longitude shift that is required to transform the lon axis of input_data to -180 to 180
         region_polygons:type dict containing tuples: points of the polygons defining regions
+        mask_file: string: location of masks (from mask_for_ref_period_data_coverage())
         '''
 
-        # no need to give in input_data again right?
         input_data=self._data
 
+        # try to load existing mask
         if os.path.isfile(mask_file):
-            # load existing mask
             pkl_file = open(mask_file, 'rb')
             self._masks = pickle.load(pkl_file)
             pkl_file.close()    
@@ -247,7 +254,7 @@ class PDF_Processing(object):
 
     def derive_distributions(self,globaldist=True):
         '''
-        Derive distributions for different regions. Plus regional masking. NOT YET IMPLEMENTED
+        Derive distributions for different regions. Plus regional masking.
         globaldist: type Boolean : Flag whether or not regional distributions shall be derived
         '''
         self._distributions={}
@@ -392,35 +399,6 @@ class PDF_Processing(object):
         method: type function name : name of the function below that has to be used. default is python
         '''
 
-        # if method=='python':      
-        #     '''
-        #     See https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
-        #     For further information on the method. 
-        #     '''
-        #     # passor key in self._periods:
-        #     weights=self._distributions[region]['weight']
-        #     # normailze weights
-        #     weights=weights.copy()/sum(weights)
-
-        #     # filter nans
-        #     diff_nan_filter=np.isfinite(diff)
-        #     no_nans=np.isfinite(diff).sum()-len(diff)
-
-        #     # cutoff outliers
-        #     inside_cutinterval=np.where((diff>=cutinterval[0]) & (diff<=cutinterval[1]))[0]
-
-        #     kde=gaussian_kde(diff[inside_cutinterval],weights=weights[inside_cutinterval])
-        #     kde.set_bandwidth(bw_method=bw)
-        #     pdf=np.zeros([512,2])
-        #     pdf[:,0]=np.linspace(cutinterval[0],cutinterval[1],num=512)
-        #     pdf_zwi=kde.evaluate(pdf[:,0])
-        #     pdf[:,1]=pdf_zwi/sum(pdf_zwi)
-        #     return pdf,no_nans
-        #     # self._distributions[region][key+'_pdf']=pdf
-        #     # cdf=pdf.copy()
-        #     # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
-        #     # self._distributions[region][key+'_cdf']=cdf
-
         if method=='python':      
             '''
             See https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
@@ -432,6 +410,7 @@ class PDF_Processing(object):
             weights=weights.copy()/sum(weights)
 
             # filter nans
+            # since now np.nanmean is used for the data_slices and in bootstrapping, there shouldn't be any nans anymore
             diff_nan_filter=np.isfinite(diff)
             no_nans=np.isfinite(diff).sum()-len(diff)
 
