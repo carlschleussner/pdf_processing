@@ -17,4 +17,4 @@ carl.schleussner@climateanalytics.org
         - Derive aggregation for reference period and target period(s)
         - SREX, Hemispheric and regionally resolved output 
         - Derive pdfs over periods and regional aggregation
-        - Derive KS test
+        - Bootstrapping method for confidence intervals
