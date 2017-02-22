@@ -43,9 +43,9 @@ class PDF_Processing(object):
         maskname:type list : generates mask for start of reference period. Default: 'global' for first year of reference period        
         check_ref_period_only: For observations, data gaps may exist also for the reference period. False: All years investigated will be checked. 
         target_periods: Target period. Only relevant if  check_ref_period_only== True
-        landmasl: np.array on lat-lon grid with 0 for ocean: This mask can be used to ignore ocean cells
-        required_coverage: None or float(0-1): if None: no missings allowed. If float: ratio odf missing values per grid-cell allowed
-        dataset: string: given name of the dataset
+        landmask:type np.array on lat-lon grid with 0 for ocean: This mask can be used to ignore ocean cells
+        required_coverage:type None or float(0-1): if None: no missings allowed. If float: ratio off missing values per grid-cell allowed
+        dataset:type string: given name of the dataset
         Generates data_frame mask 
         '''    
         lat=input_data.lat
@@ -129,13 +129,13 @@ class PDF_Processing(object):
             pickle.dump(self._masks, mask_output)
             mask_output.close()
 
-    def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
+def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
         '''
         Derive regional masks
         The resulting masks can directly taken as weights for the distribution analysis. 
         shift_lon:type float: longitude shift that is required to transform the lon axis of input_data to -180 to 180
         region_polygons:type dict containing tuples: points of the polygons defining regions
-        mask_file: string: location of masks (from mask_for_ref_period_data_coverage())
+        mask_file:type string: location of masks (from mask_for_ref_period_data_coverage())
         '''
 
         input_data=self._data
@@ -201,9 +201,12 @@ class PDF_Processing(object):
                         # shift back to original longitudes
                         self._masks[region]=np.roll(output,shift,axis=1)
 
+            # save masks
             mask_output = open(mask_file, 'wb')
             pickle.dump(self._masks, mask_output)
             mask_output.close()
+
+
 
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
         '''
@@ -216,56 +219,55 @@ class PDF_Processing(object):
         Generates data_frame for each ref and target period 
         '''
 
-        # no need to give in input_data again right?
         input_data=self._data
 
-        # Test for time axis to be annual integers
+        # Load time axis (try and error). 
         try: 
             timeaxis=input_data.year
         except:
             timeaxis=input_data.time 
-
         if isinstance(timeaxis[0], int):
             self._timeaxis=timeaxis 
         else: 
-            raise ImportError("Time axis is not annual" ) 
+            raise ImportError("Time axis is not annual." ) 
         
-        # no nead since mask is apllied later during distr
-        #input_data_masked=input_data*self._masks['global']
-        input_data_masked=input_data#*self._masks['global']
 
         # Derive time slices
-        da_time_sliced=da.DimArray(axes=[np.asarray(period_names), input_data_masked.lat, input_data_masked.lon],dims=['period', 'lat', 'lon'] )        
+        da_time_sliced=da.DimArray(axes=[np.asarray(period_names), input_data.lat, input_data.lon],dims=['period', 'lat', 'lon'] )        
         
-        # included in the next step??
-        #da_time_sliced['ref']=input_data_masked[ref_period[0]:ref_period[1]].mean(axis=0)
-
         for period,pname in zip(target_periods,period_names):
             print pname,period
-            # why was this commented????
-            #da_time_sliced[pname]=input_data_masked[period[0]:period[1]].mean(axis=0)#*self._masks[mask_for_ref_period]
-
-            # there are nans in the period now!!!
-            da_time_sliced[pname]=np.nanmean(np.array(input_data_masked[period[0]:period[1]]),axis=0)#*self._masks[mask_for_ref_period]
+            da_time_sliced[pname]=np.nanmean(np.array(input_data[period[0]:period[1]]),axis=0)#*self._masks[mask_for_ref_period]
         
         self._data_sliced=da_time_sliced
-        self._periods=self._data_sliced.period
+        self._periods=da_time_sliced.period
 
 
-    def derive_distributions(self,globaldist=True):
+    def derive_distributions(self):
         '''
-        Derive distributions for different regions. Plus regional masking.
-        globaldist: type Boolean : Flag whether or not regional distributions shall be derived
+        Derive distributions for different regions. Here the masks computed in mask_for_ref_period_data_coverage() and derive_regional_masking() are used.
         '''
         self._distributions={}
         for region in self._masks.keys():
             self._distributions[region]={}
-            m=self._masks[region]
-            self._distributions[region]['weight']=m[np.isfinite(m)].values.flatten()
+            mask=self._masks[region]
+            self._distributions[region]['weight']=mask[np.isfinite(mask)].values.flatten()
             for key in self._periods:
-                self._distributions[region][key]=self._data_sliced[key][np.isfinite(m)].values.flatten()
+                self._distributions[region][key]=self._data_sliced[key][np.isfinite(mask)].values.flatten()
 
-    def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',no_hist_bins=256,range_scaling_factor=1,bin_range=None,absolute_scaling=False,relative_diff=False):
+    def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',bin_range=None,no_hist_bins=256,range_scaling_factor=1,absolute_scaling=False,relative_diff=False):
+        '''
+        Derive regional pdf's of differences between the chosen periods.
+        ref_period:type str: name of the reference period
+        target_period:type str: name of the target period
+        pdf_method:type str: method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
+        bin_range:type array: bins used for kernel density estimation. If None this will be estimated in the function
+        no_hist_bins:type int: number of bins used in histogram method
+        absolute_scaling:type Boolean: If True, the bin_range is going to be symmetric
+        range_scaling_factor:type float: factor setting the range for kernel density estimation
+        relative_diff:type Boolean: if True, relative differences are considered
+        '''
+
 
         # derive histogram pdf for pairwise differences  
         for region in self._distributions.keys():
@@ -278,7 +280,7 @@ class PDF_Processing(object):
             if relative_diff==True:
                 diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
 
-            # Set binning range for uniform analysis
+            # Get or set binning range for uniform analysis
             if bin_range==None:
                 if absolute_scaling:
                     bin_range=[-diff.max()*range_scaling_factor,diff.max()*range_scaling_factor]
@@ -288,10 +290,10 @@ class PDF_Processing(object):
             
 
             if pdf_method=='python_silverman':
-                pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',kern='gaussian',region='global',method='python')
+                pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',region='global',method='python')
                 print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
                 # bin x-axis is left-centered. Concert to centered 
-                self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]#np.asarray([(pdf_der[i,0]+pdf_der[i+1,0])/2 for i in xrange(len(pdf_der[:,0])-1)])
+                self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]
                 self._distributions[region]['cdf']['xaxis']=self._distributions[region]['pdf']['xaxis']          
                 # save hist_values
                 self._distributions[region]['pdf'][target_period+'_'+ref_period]=pdf_der[:,1]
@@ -314,25 +316,27 @@ class PDF_Processing(object):
 
     def bootstrapping(self,bs_range,nShuff):
         '''
-        create shuffled time slices
+        Create randomly shuffled time slices
+        bs_range:type list(int,int): limiting years for shuffling.
+        nShuff:type int: number of required shuffled time slices
         '''       
         for region in self._masks.keys():
-            input_data_masked=self._data.copy()[bs_range[0]:bs_range[1]]            
+            input_data=self._data.copy()[bs_range[0]:bs_range[1]]            
             mask=self._masks[region]
             self._distributions[region]['shuffled']={}
-            #print input_data_masked
             for i in range(nShuff):
-                # ignore nans!!
-                dat = np.nanmean(input_data_masked[random.sample(input_data_masked.year,20)],axis=0).flatten()
+                # randomly pick 20 years
+                dat = np.nanmean(input_data[random.sample(input_data.year,20)],axis=0).flatten()
                 mdat = dat[np.where(np.isfinite(mask.flatten()))[0]]
                 self._distributions[region]['shuffled'][i]=mdat
 
 
     def derive_bootstrapped_conf_interval(self,pdf_method='python_silverman',quantiles=[1,5,17,25,50,75,83,95,99],relative_diff=False):
         '''
-        # derive confidence intervals for bootstrapped differences 
-        quantiles: list of quantile levels (integers in [0,100])
-        normed: flag, if pdf/cdf quantiles are normed to sum 1
+        Derive confidence intervals for bootstrapped differences 
+        pdf_method:type str: method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
+        quantiles:type list of quantile levels (integers in [0,100])
+        relative_diff:type Boolean: if True, relative differences are considered
         '''
         for region in self._distributions.keys():
             if self._distributions[region].has_key('pdf')==False:
@@ -350,18 +354,16 @@ class PDF_Processing(object):
                 tot_no_nans=0
                 for i,j in itertools.product(xrange(bs_length),xrange(bs_length)):
                     if i != j:                           
-                        # hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]  
-
-                        # relative diff ???
+                        # relative diff
                         if relative_diff==False:   
                             diff=bs_set[i]-bs_set[j]
                         if relative_diff==True:   
                             diff=(bs_set[i]-bs_set[j])/bs_set[j]*100
 
                         if pdf_method=='python_silverman':
-                            hist_der,no_nans=self.kernel_density_estimation(diff,self._histogram_range,bw='silverman',kern='gaussian',region='global',method='python')
+                            hist_der,no_nans=self.kernel_density_estimation(diff,self._histogram_range,bw='silverman',region='global',method='python')
                             tot_no_nans+=no_nans
-                            bs_matrix[:,index]=hist_der[:,1]#/hist_der.sum()
+                            bs_matrix[:,index]=hist_der[:,1]
                         elif pdf_method=='hist':
                             hist_der=np.histogram(bs_set[i]-bs_set[j],no_hist_bins, range=self._histogram_range, weights=self._distributions[region]['weight'],density=True)[0]           
                             bs_matrix[:,index]=hist_der/hist_der.sum()
@@ -378,25 +380,15 @@ class PDF_Processing(object):
                     self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
 
 
-    def ks_test(self,period_name_1,period_name_2):
-        '''
-        2-sample KS test. Comparing distributions for 'ref' and 'recent'
-        Done for each region (global is a region)
-        '''
-        self._ks={}
-        for region in self._masks.keys():
-            self._ks[region]=ks_2samp(self._distributions[region][period_name_1],self._distributions[region][period_name_2])[1]
-
-
-    def kernel_density_estimation(self,diff,cutinterval,bw='silverman',kern='gaussian',region='global',method='python'):
+    def kernel_density_estimation(self,diff,cutinterval,bw='silverman',region='global',method='python'):
         '''
         Fit PDFs and CDFs to respective regional functions. 
         data:dataset
-        cutinterval: type tuple : Min/Max range for the PDF
-        globaldist: type str : Kernel, default 'gaussian'. See R-function for update
-        bw: type int : smoothing bandwidth to be used. can be a scalar or method for estimation 'scott' or 'silverman' (python only)
-        region: type str : Regional analysis. 
-        method: type function name : name of the function below that has to be used. default is python
+        diff:type array: array on which the kde is applied 
+        cutinterval:type tuple : Min/Max range for the PDF
+        bw:type int : smoothing bandwidth to be used. can be a scalar or method for estimation 'scott' or 'silverman' (python only)
+        region:type str : Regional analysis. 
+        method:type function name : name of the function below that has to be used. default is python
         '''
 
         if method=='python':      
@@ -404,13 +396,11 @@ class PDF_Processing(object):
             See https://gist.github.com/tillahoffmann/f844bce2ec264c1c8cb5
             For further information on the method. 
             '''
-            # passor key in self._periods:
             weights=self._distributions[region]['weight']
             # normailze weights
             weights=weights.copy()/sum(weights)
 
-            # filter nans
-            # since now np.nanmean is used for the data_slices and in bootstrapping, there shouldn't be any nans anymore
+            # filter for nans (normally diff is coming without nans already)
             diff_nan_filter=np.isfinite(diff)
             no_nans=np.isfinite(diff).sum()-len(diff)
 
@@ -424,72 +414,50 @@ class PDF_Processing(object):
             pdf_zwi=kde.evaluate(pdf[:,0])
             pdf[:,1]=pdf_zwi/sum(pdf_zwi)
             return pdf,no_nans
-            # self._distributions[region][key+'_pdf']=pdf
-            # cdf=pdf.copy()
-            # cdf[:,1]=[sum(pdf[:i,1]) for i in xrange(pdf.shape[0])]
-            # self._distributions[region][key+'_cdf']=cdf
 
-        if method=='R':      
-            '''
-            Still not the same as python method
-            See https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
-            For further information on the method. 
-            '''
-            if not os.path.exists(self._working_dir+'tmp/') :
-                os.mkdir(self._working_dir+'tmp/')
+        # comparison with a similar method in R possible:
+        # if method=='R':      
+        #     '''
+        #     Still not the same as python method
+        #     See https://stat.ethz.ch/R-manual/R-devel/library/stats/html/density.html
+        #     For further information on the method. 
+        #     '''
+        #     if not os.path.exists(self._working_dir+'tmp/') :
+        #         os.mkdir(self._working_dir+'tmp/')
 
-            for key in self._periods:
-                fstring=self._working_dir+'tmp/tmp_p_to_R.dat'
-                out_to_r=np.vstack((self._distributions[region][key],self._distributions[region]['weight']))
-                np.savetxt(fstring,out_to_r.transpose())        
-                rsavestring=self._working_dir+'tmp/tmp_processed_R_to_p.dat'
+        #     for key in self._periods:
+        #         fstring=self._working_dir+'tmp/tmp_p_to_R.dat'
+        #         out_to_r=np.vstack((self._distributions[region][key],self._distributions[region]['weight']))
+        #         np.savetxt(fstring,out_to_r.transpose())        
+        #         rsavestring=self._working_dir+'tmp/tmp_processed_R_to_p.dat'
 
-                f = open(self._working_dir+'tmp/R_kernel_ana.R', 'w') 
-                f.write('t<-read.table(\"'+fstring+'\") \n')
-                f.write('pdf=density(t$V1,weights=t$V2/sum(t$V2),from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+kern+'\",bw='+str(bw)+',na.rm=TRUE) \n')
-                f.write('out <- data.frame(x=pdf$x,y=pdf$y/sum(pdf$y))\n')
-                f.write('write.table(out,\"'+rsavestring+'\" ,row.names = FALSE,col.names = FALSE ) \n')
-                f.close()
-                ret=os.system('Rscript '+self._working_dir+'tmp/R_kernel_ana.R')#, shell=True)
-                if ret !=0:
-                    print 'Error in Kernel Estimation'
-                r=np.loadtxt(rsavestring)
-                return r,np.nan
-                # self._distributions[region][key+'_pdf']=r
-                # cdf=r.copy()
-                # cdf[:,1]=[sum(r[:i,1]) for i in xrange(r.shape[0])]
-                # self._distributions[region][key+'_cdf']=cdf
+        #         f = open(self._working_dir+'tmp/R_kernel_ana.R', 'w') 
+        #         f.write('t<-read.table(\"'+fstring+'\") \n')
+        #         f.write('pdf=density(t$V1,weights=t$V2/sum(t$V2),from='+str(cutinterval[0])+',to='+str(cutinterval[1])+', kernel=\"'+'gaussian'+'\",bw='+str(bw)+',na.rm=TRUE) \n')
+        #         f.write('out <- data.frame(x=pdf$x,y=pdf$y/sum(pdf$y))\n')
+        #         f.write('write.table(out,\"'+rsavestring+'\" ,row.names = FALSE,col.names = FALSE ) \n')
+        #         f.close()
+        #         ret=os.system('Rscript '+self._working_dir+'tmp/R_kernel_ana.R')#, shell=True)
+        #         if ret !=0:
+        #             print 'Error in Kernel Estimation'
+        #         r=np.loadtxt(rsavestring)
+        #         return r,np.nan
 
-    def quantiles_from_cdf(self,quantiles=[0.05,0.1,0.25,0.5,0.75,0.9,0.95]):
+
+    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
         '''
-        estimate quantiles from cdf
-        quantiles: type list : quantiles to be analyzed
-        '''
-        self._quantiles={}
-        for region in self._masks.keys():
-            self._quantiles[region]={}
-            for period in self._periods:
-                self._quantiles[region][period]={}
-                for qu in quantiles:
-                    self._quantiles[region][period][qu]=self._distributions[region][period+'_cdf'][np.argmin(abs(self._distributions[region][period+'_cdf'][:,1]-qu)),0]
-
-
-    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,limits=[-180,180,-90,90],ax=None,figsize=(8,4),coastline_width=0.5,out_file=None,title='',show=True):
-        '''
-        plot maps of data. 
-        meta_data: list of strs: meta information required to acces data
-        source: str: default='_data'. if masks are to be plotted, specify source='_masks'
-        period: str: if  the averag over a period is to be plotted specify the period name
-        time: int: index in time axis of data (to be plotted)
-        color_bar: logical: if True, color-scale is plotted besides the map
-        color_label: str: label of the color-scale
-        color_palette: plt.cm. object: colors used
-        color_range: [float,float]: minimal and maximal value on color-scale
-        limits: [lon_min,lon_max,lat_min,lat_max]: extend of the map
-        ax: subplot: subplot on which the map will be plotted
-        out_file: str: location where the plot is saved
-        title: str: title of the plot
-        show: logical: show the subplot?
+        Plot maps of inputted data. 
+        color_bar:type logical: if True, color-scale is plotted besides the map
+        color_label:type str: label of the color-scale
+        color_palette:type plt.cm. object: colors used
+        color_range:type [float,float]: minimal and maximal value on color-scale
+        coastline_width:type float: width of coastlines
+        limits:type [lon_min,lon_max,lat_min,lat_max]: extend of the map
+        ax: subplot:type subplot on which the map will be plotted
+        figsize:type (int,int): size of the saved figure (if saved)
+        out_file:type str: location where the plot is saved. Not saved if None
+        title: str:type title of the plot
+        show: logical:type show the subplot?
         '''
 
         lat=self._data.lat.copy()
@@ -515,17 +483,12 @@ class PDF_Processing(object):
 
         # show coastlines and borders
         m.drawcoastlines(linewidth=coastline_width)
-        #m.drawstates()
-        #m.drawcountries()
         m.drawparallels(np.arange(-60,100,30),labels=[0,0,0,0],color='grey',linewidth=0.5) 
         m.drawmeridians([-120,0,120],labels=[0,0,0,0],color='grey',linewidth=0.5)
 
         # get color_range
         if color_range==None:
             color_range=[np.min(to_plot[np.isfinite(to_plot)]),np.max(to_plot[np.isfinite(to_plot)])]
-
-        # when saving files as pdf interpolation='none' is not working!
-        #im = m.imshow(to_plot,cmap=color_palette,vmin=color_range[0],vmax=color_range[1],interpolation='nearest')
 
         lon-=np.diff(lon,1)[0]/2.
         lat-=np.diff(lat,1)[0]/2.
@@ -543,61 +506,6 @@ class PDF_Processing(object):
         if out_file==None and show==True:plt.show()
         if out_file!=None:plt.tight_layout() ; plt.savefig(out_file) ; plt.clf()
         return(im)
-
-
-
-    def show_result(self,small_plot_function,plot_settings,output_name):
-        '''
-        Creates world map with little subplots around it
-        Information about plot arrangement is stored in plot_settings
-        The subplots will be filled with the input of small_plot_function
-        small_plot_functions can be defined outside of this class. the function name of the defined small_plot_function is given to show_results()
-        '''
-
-        # settings for big plot image
-        ratio=0.2
-        fig = plt.figure(figsize=(9,6))
-
-        # big plot window
-        ax_big=fig.add_axes([0,0,1,1])
-        ax_big.axis('off')
-
-        # map in the center of the big plot window (transparant background)
-        ax_map=fig.add_axes([ratio,ratio,1-2*ratio,1-2*ratio])
-        ax_map.patch.set_facecolor('None')
-        ax_map.axis('off')
-        m=Basemap(ax=ax_map)
-        m.drawcoastlines()
-
-        for region in self._masks.keys():
-            if region != 'global':
-                # plot the ploygon on the map
-                x,y=Polygon(plot_settings['points'][region]).exterior.xy
-                m.plot(x,y,'g')
-                # add a point in the center of the region and a line pointing to the outersubplot
-                m.plot(np.mean(x),np.mean(y),'og')
-                ax_big.plot(plot_settings['line_to_subplot'][region][0:2],plot_settings['line_to_subplot'][region][2:4],'g')
-                # add the outer subplot
-                ax = fig.add_axes(plot_settings['subplot_window'][region],axisbg='w') 
-                # fill the outer subplot with whatever is defined in small_plot_function
-                small_plot_function(subax=ax,region=region)
-
-        # add global subplot
-        ax = fig.add_axes(plot_settings['subplot_window']['global'],axisbg='w') 
-        small_plot_function(subax=ax,region='global')    
-        
-        ax_big.set_xlim([-200,200])
-        ax_big.set_ylim([-100,100])
-
-        if output_name!=None:   plt.savefig(output_name)
-        if output_name==None:   plt.show()
-
-    # def save_output(self,fname):
-
-
-
-
-
 
 
 
