@@ -35,7 +35,7 @@ class PDF_Processing(object):
         self._working_dir = working_dir
         self._masks={}
 
-    def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None,required_coverage=None,dataset=''):
+    def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None,required_coverage=None,dataset='',overwrite=False):
         '''
         Grid cell level averaging for different periods along time axis        
         input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
@@ -55,7 +55,7 @@ class PDF_Processing(object):
         mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.pkl'
 
         # try to load existing mask
-        if os.path.isfile(mask_file):
+        if os.path.isfile(mask_file) and overwrite==False:
             pkl_file = open(mask_file, 'rb')
             self._masks = pickle.load(pkl_file)
             pkl_file.close()   
@@ -129,19 +129,25 @@ class PDF_Processing(object):
             pickle.dump(self._masks, mask_output)
             mask_output.close()
 
-    def derive_regional_masking(self,shift_lon=0.0,regions_polygons=None,mask_file='support/144x96_srex_masks.pkl'):
+    def derive_regional_masking(self,shift_lon=0.0,region_polygons=None,region_type='continental',dataset='',overwrite=False):
         '''
         Derive regional masks
         The resulting masks can directly taken as weights for the distribution analysis. 
         shift_lon:type float: longitude shift that is required to transform the lon axis of input_data to -180 to 180
-        region_polygons:type dict containing tuples: points of the polygons defining regions
+
+        # changed region_polygons!!!! for SREX i used different region_polygons. now they have to be directly Polygons!!!
+        region_polygons:type dict: the polygons defining regions
         mask_file:type string: location of masks (from mask_for_ref_period_data_coverage())
         '''
 
         input_data=self._data
+        lat=input_data.lat
+        lon=input_data.lon
+
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.pkl'
 
         # try to load existing mask
-        if os.path.isfile(mask_file):
+        if os.path.isfile(mask_file) and overwrite==False:
             pkl_file = open(mask_file, 'rb')
             self._masks = pickle.load(pkl_file)
             pkl_file.close()    
@@ -167,16 +173,17 @@ class PDF_Processing(object):
                 for j in range(ny):
                     y1 = lat[j]-dy[j]/2.
                     y2 = lat[j]+dy[j]/2.
-                    #grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
-                    grid_polygons[i,j] = Polygon([(y1,x1),(y1,x2),(y2,x2),(y2,x1)])
+                    grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
+                    #grid_polygons[i,j] = Polygon([(y1,x1),(y1,x2),(y2,x2),(y2,x1)])
 
             # since the lon axis has been shifted, masks and outputs will have to be shifted as well. This shift is computed here
             lon=lon-shift_lon
             shift = len(lon)-np.where(lon==lon[0]-shift_lon)[0][0]
 
 
-            for region in regions_polygons.keys():
-                poly=Polygon(regions_polygons[region]['poly'])
+            for region in region_polygons.keys():
+                print region
+                poly=region_polygons[region]
                 overlap = np.zeros((ny,nx))
                 for i in range(nx):
                     for j in range(ny):
@@ -196,15 +203,22 @@ class PDF_Processing(object):
                     # mask zeros
                     output[output==0]=np.nan
                     output=np.ma.masked_invalid(output)
-                    # only save mask if more than 50 grid cells available 
-                    if len(np.where(np.isfinite(output))[0])>50:
+                    # only save mask if more than 30 grid cells available 
+                    if len(np.where(np.isfinite(output))[0])>30:
                         # shift back to original longitudes
-                        self._masks[region]=np.roll(output,shift,axis=1)
+                        output=np.roll(output,shift,axis=1)
+                        maskout=input_data.ix[0,:,:].copy()*np.nan
+                        maskout.ix[:,:]=output[:,:]
+                        self._masks[region]=maskout
 
-            # save masks
-            mask_output = open(mask_file, 'wb')
-            pickle.dump(self._masks, mask_output)
-            mask_output.close()
+
+
+
+                # check step. normaly one tab back
+                # save masks
+                mask_output = open(mask_file, 'wb')
+                pickle.dump(self._masks, mask_output)
+                mask_output.close()
 
 
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
