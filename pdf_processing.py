@@ -145,6 +145,7 @@ class PDF_Processing(object):
         lon=input_data.lon
 
         mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.pkl'
+        print mask_file
 
         # try to load existing mask
         if os.path.isfile(mask_file) and overwrite==False:
@@ -284,8 +285,8 @@ class PDF_Processing(object):
 
         # derive histogram pdf for pairwise differences  
         for region in self._distributions.keys():
-            self._distributions[region]['pdf']={}
-            self._distributions[region]['cdf']={}
+            if 'pdf' not in self._distributions[region].keys(): self._distributions[region]['pdf']={}
+            if 'cdf' not in self._distributions[region].keys(): self._distributions[region]['cdf']={}
             
              # get diff, relative diff is posible (in %)
             if relative_diff==False:
