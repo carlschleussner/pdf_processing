@@ -290,13 +290,14 @@ class PDF_Processing(object):
             if 'cdf' not in self._distributions[region].keys(): self._distributions[region]['cdf']={}
             if 'diff' not in self._distributions[region].keys(): self._distributions[region]['diff']={}
             
-             # get diff, relative diff is posible (in %)
+            # get diff, relative diff is posible (in %)
             if diff==None:
                 if relative_diff==False:
                     diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
                 if relative_diff==True:
                     diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
             self._distributions[region]['diff'][target_period+'_'+ref_period]=diff
+            print diff
 
             # Get or set binning range for uniform analysis
             if bin_range==None:

@@ -229,25 +229,31 @@ files_to_treat.pop(50, None)
 files_to_treat.pop(75, None)
 
 cmip5_dict={}
-TXx_0p5_hist=np.zeros([94,14])*np.nan
+cmip5_dict['median']={}
+cmip5_dict['25']={}
+cmip5_dict['75']={}
 
-for model,mod_index in zip(files_to_treat.keys(),range(13)):
-	print model
-	cmip5_dict[model]={}
+diff_dict={}
 
-	# time informations and periods
-	ref_period=[1991,2010]
-	target_periods=[]
-	period_names=[]
-	for change in [-0.5,+0.811,+1.311]:
-		end_year=files_to_treat[model][change]
-		print end_year
-		target_periods.append([end_year-19,end_year])
-		period_names.append(str(change))
-	target_periods.append(ref_period)
-	period_names.append('ref')
+for var in ['TXx']:
+	if var not in diff_dict.keys():	diff_dict[var]=np.zeros([94,13])*np.nan
 
-	for var in ['TXx']:
+	for model,mod_index in zip(files_to_treat.keys(),range(13)):
+		print model
+		cmip5_dict[model]={}
+
+		# time informations and periods
+		ref_period=[1991,2010]
+		target_periods=[]
+		period_names=[]
+		for change in [-0.5,+0.811,+1.311]:
+			end_year=files_to_treat[model][change]
+			print end_year
+			target_periods.append([end_year-19,end_year])
+			period_names.append(str(change))
+		target_periods.append(ref_period)
+		period_names.append('ref')
+
 		os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
 		nc_in=Dataset(files_to_treat[model][varin_dict[var]['var_name']+'_merged'])
 		datevar = []
@@ -268,31 +274,48 @@ for model,mod_index in zip(files_to_treat.keys(),range(13)):
 		os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/pdf_processing/')
 		cmip5_dict[model][var]=pdf.PDF_Processing(var)
 		cmip5_dict[model][var].mask_for_ref_period_data_coverage(input_data,ref_period,check_ref_period_only=False,target_periods=target_periods,dataset='HadEX2')
-        cmip5_dict[model][var].derive_regional_masking(region_type='region',dataset='HadEX2',overwrite=False)
+		cmip5_dict[model][var].derive_regional_masking(region_type='region',dataset='HadEX2',overwrite=False)
 
-        #cmip5_dict[model][var]._masks['global']=cmip5_dict['HadEX2'][var]._masks['global']
-        
-        # Derive time slices
-        cmip5_dict[model][var].derive_time_slices(ref_period,target_periods,period_names)
-        cmip5_dict[model][var].derive_distributions()
+		# Derive time slices
+		cmip5_dict[model][var].derive_time_slices(ref_period,target_periods,period_names)
+		cmip5_dict[model][var].derive_distributions()
 
-        cmip5_dict[model][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+		cmip5_dict[model][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+			
+		diff_dict[var][:,mod_index]=cmip5_dict[model][var]._distributions['global']['diff']['ref_-0.5'].copy()
 
-        if model in [25,50,75]:linewidth=3
-    	else: linewidth=1
-        plt.plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5'],linewidth=linewidth)
-        
+	cmip5_dict['median'][var]=pdf.PDF_Processing(var)
+	cmip5_dict['median'][var]._distributions=cmip5_dict[model][var]._distributions.copy()
+	cmip5_dict['median'][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'],diff=np.percentile(diff_dict[var],50,axis=1))
+
+	cmip5_dict['25'][var]=pdf.PDF_Processing(var)
+	cmip5_dict['25'][var]._distributions=cmip5_dict[model][var]._distributions.copy()
+	cmip5_dict['25'][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'],diff=np.percentile(diff_dict[var],25,axis=1))
+
+	cmip5_dict['75'][var]=pdf.PDF_Processing(var)
+	cmip5_dict['75'][var]._distributions=cmip5_dict[model][var]._distributions.copy()
+	cmip5_dict['75'][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'],diff=np.percentile(diff_dict[var],75,axis=1))
+
+	
+for var in ['TXx']:
+	f,pl=plt.subplots(nrows=2,ncols=3,figsize=(10,4))
+	pplot=pl.flatten()
+	for region,reg_index in zip(['global','Europe','Asia','North_America','Russia'],range(5)):
+		for model,mod_index in zip(files_to_treat.keys(),range(13)):
+			pplot[reg_index].plot(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],cmip5_dict[model][var]._distributions[region]['pdf']['ref_-0.5'],linewidth=1,color='gray')
+
+		pplot[reg_index].plot(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],cmip5_dict['median'][var]._distributions[region]['pdf']['ref_-0.5'],linewidth=3,label=str('median'))
+		pplot[reg_index].plot(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],cmip5_dict['25'][var]._distributions[region]['pdf']['ref_-0.5'],linewidth=3,label=str(25))
+		pplot[reg_index].plot(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],cmip5_dict['75'][var]._distributions[region]['pdf']['ref_-0.5'],linewidth=3,label=str(75),linestyle=':')
+
+		pplot[reg_index].set_xlabel(varin_dict[var]['unit'])
+		pplot[reg_index].set_title(region)
+		pplot[reg_index].legend(loc='upper right')
+	plt.savefig('../CMIP5_TXx.png',dpi=300)
+	plt.clf()
+#plt.show()
 
 
-        TXx_0p5_hist[:,mod_index]=cmip5_dict[model][var]._distributions['global']['diff']['ref_-0.5']
-
-        #cmip5_dict[model][var].derive_pdf_difference(str(+0.811),str(+1.311),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
-        #plt.plot(cmip5_dict[model][var]._distributions['Europe']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['Europe']['pdf']['1.311_0.811'])
-
-       	#plt.show()
-        #asdasd
-
-plt.show()
 
 
 
