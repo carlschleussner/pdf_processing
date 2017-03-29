@@ -21,7 +21,7 @@ os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
 
 
 # only 13 models, could be improved!
-if True:
+if False:
 	files_to_treat={}
 
 	for var in ['tasmax','tasmin']:
@@ -34,16 +34,39 @@ if True:
 				if var not in files_to_treat[model].keys():
 					files_to_treat[model][var+'_'+scenario]=file
 
+	for model in files_to_treat.keys():
+		for var in ['tasmax','tasmin']:
+			try:
+				nc_hist=Dataset(files_to_treat[model][var+'_historical'])
+				datevar = []
+				datevar.append(num2date(nc_hist.variables['time'][:],units = nc_hist.variables['time'].units,calendar = nc_hist.variables['time'].calendar))
+				year_hist=np.array([int(str(date).split("-")[0])	for date in datevar[0][:]])
+
+				nc_45=Dataset(files_to_treat[model][var+'_rcp45'])
+				datevar = []
+				datevar.append(num2date(nc_45.variables['time'][:],units = nc_45.variables['time'].units,calendar = nc_45.variables['time'].calendar))
+				year_45=np.array([int(str(date).split("-")[0])	for date in datevar[0][:]])
+
+				files_to_treat[model][var+'_year']=np.concatenate((year_hist,year_45),axis=0)
+
+				files_to_treat[model]['lat']=nc_hist.variables['lat'][:]
+				files_to_treat[model]['lon']=nc_hist.variables['lon'][:]
+
+				var_hist=nc_hist.variables[var][:,:,:]
+				var_45=nc_45.variables[var][:,:,:]
+				var_in=np.concatenate((var_hist,var_45),axis=0)
+				if var_in.mean()>150:var_in-=273.15
+				files_to_treat[model][var+'_values']=var_in
+			except:
+				print model
+
+
 
 	for model in files_to_treat.keys():
 		GMT=glob.glob('../wlcalculator/data/cmip5_ver002/'+model.lower()+'.rcp45.r1i*')
 		if len(GMT)>0:
 			files_to_treat[model]['GMT']=GMT[0]
-		if len(files_to_treat[model].keys())<5:
-			files_to_treat.pop(model, None)
 
-
-	for model in files_to_treat.keys():
 		try:
 			nc_in=Dataset(files_to_treat[model]['GMT'],"r")
 
@@ -64,39 +87,96 @@ if True:
 
 			rmean=rmean-rmean[np.where(year==2010)[0]]
 
-			print model,rmean
-
 			for change in [-0.5,+0.811,+1.311]:
 				closest=np.nanargmin(abs(rmean-change))
-				print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
+				#print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
 				if np.nanmin(abs(rmean-change))<0.1:
 					files_to_treat[model][change]=year[closest]
+
+			files_to_treat[model]['GMT_year']=year
+			files_to_treat[model]['GMT_values']=GMT
 		except:
 			print model
 
 	for model in files_to_treat.keys():
-		if len(files_to_treat[model].keys())<8:
+		if len(files_to_treat[model].keys())<16:
 			files_to_treat.pop(model, None)
 
-	# # model median
-	# files_to_treat['median']={}
-	# for scenario in ['rcp45','historical']:
-	# 	TXx_command='cdo enspctl,50 '
-	# 	TNn_command='cdo enspctl,50 '
-	# 	GMT_command='cdo enspctl,50 '
-	# 	for model in files_to_treat.keys():
-	# 		if model not in ['median','HadGEM2-CC','CCSM4']:
-	# 			TXx_command+=files_to_treat[model]['tasmax'+'_'+scenario]+' '
-	# 			TNn_command+=files_to_treat[model]['tasmin'+'_'+scenario]+' '
-	# 			GMT_command+=files_to_treat[model]['GMT']+' '
-	# 			os.system('cdo info -seldate '+files_to_treat[model]['GMT'])
 
-	# 	TXx_command+='CMIP5_regrid/tasmax_median_'+scenario+'_73x96.nc'
-	# 	TNn_command+='CMIP5_regrid/tasmin_median_'+scenario+'_73x96.nc'
-	# 	GMT_command+='CMIP5_regrid/GMT_median.nc'
-	# 	os.system(TXx_command)
-	# 	os.system(TNn_command)
-	# 	os.system(GMT_command)
+	# median
+	for var in ['tasmax','tasmin']:
+		min_yr=[]
+		max_yr=[]
+		for model in files_to_treat.keys():
+			min_yr.append(files_to_treat[model][var+'_year'].min())
+			max_yr.append(files_to_treat[model][var+'_year'].max())
+		print var, min_yr, max_yr
+
+	files_to_treat['median']={}
+
+	for var in ['tasmax','tasmin']:
+		for model in files_to_treat.keys():
+			if model!='median':			
+				os.system('cdo -O mergetime '+files_to_treat[model][var+'_historical']+' '+files_to_treat[model][var+'_rcp45']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc')
+				files_to_treat[model][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc'
+
+		command='cdo -O enspctl,50 '
+		for model in files_to_treat.keys():
+			if model!='median':
+				os.system('cdo -O delete,timestep=-1 '+files_to_treat[model][var+'_merged']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
+				if model in ['HadGEM2-CC']:
+					os.system('rm CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
+					os.system('mv CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
+				command+='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc '
+		command+='CMIP5_regrid_ensemble_selection/'+var+'_median_73x96.nc'
+		os.system(command)
+		files_to_treat['median'][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_median_73x96.nc'
+
+	# median GMT
+	min_yr=[]
+	max_yr=[]
+	for model in files_to_treat.keys():
+		if model!='median':
+			min_yr.append(files_to_treat[model]['GMT_year'].min())
+			max_yr.append(files_to_treat[model]['GMT_year'].max())	
+	print min_yr, max_yr
+
+	time_axis=range(int(max(min_yr)),int(min(max_yr)),1)
+	median_GMT=np.array(time_axis,'f')*0
+	for model in files_to_treat.keys():
+		if model!='median':
+			relevant_years=np.where((files_to_treat[model]['GMT_year']>=time_axis[0]) & (files_to_treat[model]['GMT_year']<=time_axis[-1]))[0]
+			if model in ['HadGEM2-ES','HadGEM2-CC']:
+				relevant_before_2005=np.where((files_to_treat[model]['GMT_year']>=time_axis[0]) & (files_to_treat[model]['GMT_year']<=2005))[0]
+				relevant_after_2006=np.where((files_to_treat[model]['GMT_year']>=2006) & (files_to_treat[model]['GMT_year']<=time_axis[-1]))[0]
+				yr_2006=np.mean([files_to_treat[model]['GMT_values'][relevant_before_2005][-1],files_to_treat[model]['GMT_values'][relevant_after_2006][0]])
+				GMT_fixed=np.array(list(files_to_treat[model]['GMT_values'][relevant_before_2005])+[yr_2006]+list(files_to_treat[model]['GMT_values'][relevant_after_2006]))
+				median_GMT+=GMT_fixed
+				print GMT_fixed
+			else:	
+				print model
+				median_GMT+=files_to_treat[model]['GMT_values'][relevant_years]
+
+	median_GMT/=len(files_to_treat.keys())
+
+	# time slice
+	ave_window=20
+	GMT=median_GMT.copy()
+	rmean=GMT.copy()*np.nan
+	for i in range(19,len(rmean)):
+		#print i-ave_window+1,i
+		rmean[i]=GMT[i-ave_window:i].mean()
+	#rmean_dict[ds]=rmean-rmean.ix[2015].values
+
+	rmean=rmean-rmean[np.where(year==2010)[0]]
+
+	for change in [-0.5,+0.811,+1.311]:
+		closest=np.nanargmin(abs(rmean-change))
+		#print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
+		if np.nanmin(abs(rmean-change))<0.1:
+			files_to_treat['median'][change]=year[closest]
+
+
 
 
 
