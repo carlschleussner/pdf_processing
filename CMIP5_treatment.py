@@ -112,69 +112,75 @@ if False:
 			max_yr.append(files_to_treat[model][var+'_year'].max())
 		print var, min_yr, max_yr
 
-	files_to_treat['median']={}
+	for qu in [25,50,75]:
+		files_to_treat[qu]={}
 
-	for var in ['tasmax','tasmin']:
-		for model in files_to_treat.keys():
-			if model!='median':			
-				os.system('cdo -O mergetime '+files_to_treat[model][var+'_historical']+' '+files_to_treat[model][var+'_rcp45']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc')
-				files_to_treat[model][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc'
+		for var in ['tasmax','tasmin']:
+			for model in files_to_treat.keys():
+				if model not in [25,50,75]:			
+					os.system('cdo -O mergetime '+files_to_treat[model][var+'_historical']+' '+files_to_treat[model][var+'_rcp45']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc')
+					files_to_treat[model][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc'
 
-		command='cdo -O enspctl,50 '
-		for model in files_to_treat.keys():
-			if model!='median':
-				os.system('cdo -O delete,timestep=-1 '+files_to_treat[model][var+'_merged']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
-				if model in ['HadGEM2-CC']:
-					os.system('rm CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
-					os.system('mv CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
-				command+='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc '
-		command+='CMIP5_regrid_ensemble_selection/'+var+'_median_73x96.nc'
-		os.system(command)
-		files_to_treat['median'][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_median_73x96.nc'
+			command='cdo -O enspctl,'+str(qu)+' '
+			for model in files_to_treat.keys():
+				if model not in [25,50,75]:	
+					os.system('cdo -O delete,timestep=-1 '+files_to_treat[model][var+'_merged']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc')
+					if model in ['HadGEM2-CC']:
+						os.system('rm CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc ')
+						os.system('cp CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc ')
+					command+='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96_cut.nc '
+			command+='CMIP5_regrid_ensemble_selection/'+var+'_'+str(qu)+'_73x96_cut.nc'
+			os.system(command)
+			files_to_treat[qu][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_'+str(qu)+'_73x96_cut.nc'
 
 	# median GMT
 	min_yr=[]
 	max_yr=[]
 	for model in files_to_treat.keys():
-		if model!='median':
+		if model not in [25,50,75]:
 			min_yr.append(files_to_treat[model]['GMT_year'].min())
 			max_yr.append(files_to_treat[model]['GMT_year'].max())	
 	print min_yr, max_yr
 
 	time_axis=range(int(max(min_yr)),int(min(max_yr)),1)
-	median_GMT=np.array(time_axis,'f')*0
+
+
+	# was mean! not median change
+	GMTs=np.zeros([len(time_axis),13])*np.nan	
+	count=0
 	for model in files_to_treat.keys():
-		if model!='median':
+		if model not in [25,50,75]:
 			relevant_years=np.where((files_to_treat[model]['GMT_year']>=time_axis[0]) & (files_to_treat[model]['GMT_year']<=time_axis[-1]))[0]
 			if model in ['HadGEM2-ES','HadGEM2-CC']:
 				relevant_before_2005=np.where((files_to_treat[model]['GMT_year']>=time_axis[0]) & (files_to_treat[model]['GMT_year']<=2005))[0]
 				relevant_after_2006=np.where((files_to_treat[model]['GMT_year']>=2006) & (files_to_treat[model]['GMT_year']<=time_axis[-1]))[0]
 				yr_2006=np.mean([files_to_treat[model]['GMT_values'][relevant_before_2005][-1],files_to_treat[model]['GMT_values'][relevant_after_2006][0]])
 				GMT_fixed=np.array(list(files_to_treat[model]['GMT_values'][relevant_before_2005])+[yr_2006]+list(files_to_treat[model]['GMT_values'][relevant_after_2006]))
-				median_GMT+=GMT_fixed
+				GMTs[:,count]=GMT_fixed
 				print GMT_fixed
 			else:	
 				print model
-				median_GMT+=files_to_treat[model]['GMT_values'][relevant_years]
+				GMTs[:,count]=files_to_treat[model]['GMT_values'][relevant_years]
+			count+=1
 
-	median_GMT/=len(files_to_treat.keys())
 
-	# time slice
-	ave_window=20
-	GMT=median_GMT.copy()
-	rmean=GMT.copy()*np.nan
-	for i in range(19,len(rmean)):
-		#print i-ave_window+1,i
-		rmean[i]=GMT[i-ave_window:i].mean()
-	#rmean_dict[ds]=rmean-rmean.ix[2015].values
+	for qu in [25,50,75]:
+		# time slice
+		ave_window=20
+		GMT=np.percentile(GMTs,qu,axis=1)
+		rmean=GMT.copy()*np.nan
+		for i in range(19,len(rmean)):
+			#print i-ave_window+1,i
+			rmean[i]=GMT[i-ave_window:i].mean()
+		#rmean_dict[ds]=rmean-rmean.ix[2015].values
 
-	rmean=rmean-rmean[np.where(year==2010)[0]]
+		rmean=rmean-rmean[np.where(year==2010)[0]]
 
-	for change in [-0.5,+0.811,+1.311]:
-		closest=np.nanargmin(abs(rmean-change))
-		#print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
-		if np.nanmin(abs(rmean-change))<0.1:
-			files_to_treat['median'][change]=year[closest]
+		for change in [-0.5,+0.811,+1.311]:
+			closest=np.nanargmin(abs(rmean-change))
+			#print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
+			if np.nanmin(abs(rmean-change))<0.1:
+				files_to_treat[qu][change]=year[closest]
 
 
 
@@ -218,10 +224,12 @@ varin_dict={
     }
 
 
-
+files_to_treat.pop(25, None)
+files_to_treat.pop(50, None)
+files_to_treat.pop(75, None)
 
 cmip5_dict={}
-TXx_0p5_hist=np.zeros([512,14])*np.nan
+TXx_0p5_hist=np.zeros([94,14])*np.nan
 
 for model,mod_index in zip(files_to_treat.keys(),range(13)):
 	print model
@@ -241,26 +249,17 @@ for model,mod_index in zip(files_to_treat.keys(),range(13)):
 
 	for var in ['TXx']:
 		os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
-		nc_hist=Dataset(files_to_treat[model][varin_dict[var]['var_name']+'_historical'])
+		nc_in=Dataset(files_to_treat[model][varin_dict[var]['var_name']+'_merged'])
 		datevar = []
-		datevar.append(num2date(nc_hist.variables['time'][:],units = nc_hist.variables['time'].units,calendar = nc_hist.variables['time'].calendar))
-		year_hist=np.array([int(str(date).split("-")[0])	for date in datevar[0][:]])
+		datevar.append(num2date(nc_in.variables['time'][:],units = nc_in.variables['time'].units,calendar = nc_in.variables['time'].calendar))
+		year=np.array([int(str(date).split("-")[0])	for date in datevar[0][:]])
 
-		nc_45=Dataset(files_to_treat[model][varin_dict[var]['var_name']+'_rcp45'])
-		datevar = []
-		datevar.append(num2date(nc_45.variables['time'][:],units = nc_45.variables['time'].units,calendar = nc_45.variables['time'].calendar))
-		year_45=np.array([int(str(date).split("-")[0])	for date in datevar[0][:]])
-
-		year=np.concatenate((year_hist,year_45),axis=0)
-
-		lat=nc_hist.variables['lat'][:]
-		lon=nc_hist.variables['lon'][:]
+		lat=nc_in.variables['lat'][:]
+		lon=nc_in.variables['lon'][:]
 
 		# combine datasets
 		var_name=varin_dict[var]['var_name']
-		var_hist=nc_hist.variables[var_name][:,:,:]
-		var_45=nc_45.variables[var_name][:,:,:]
-		var_in=np.concatenate((var_hist,var_45),axis=0)
+		var_in=nc_in.variables[var_name][:,:,:]
 		if var_in.mean()>150:var_in-=273.15
 
 		input_data=da.DimArray(var_in[:,:,:].squeeze(), axes=[year, lat, lon],dims=['year', 'lat', 'lon'] )
@@ -278,8 +277,14 @@ for model,mod_index in zip(files_to_treat.keys(),range(13)):
         cmip5_dict[model][var].derive_distributions()
 
         cmip5_dict[model][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
-        #plt.plot(cmip5_dict[model][var]._distributions['Europe']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['Europe']['pdf']['ref_-0.5'])
-        TXx_0p5_hist[:,mod_index]=cmip5_dict[model][var]._distributions['Europe']['pdf']['ref_-0.5']
+
+        if model in [25,50,75]:linewidth=3
+    	else: linewidth=1
+        plt.plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5'],linewidth=linewidth)
+        
+
+
+        TXx_0p5_hist[:,mod_index]=cmip5_dict[model][var]._distributions['global']['diff']['ref_-0.5']
 
         #cmip5_dict[model][var].derive_pdf_difference(str(+0.811),str(+1.311),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
         #plt.plot(cmip5_dict[model][var]._distributions['Europe']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['Europe']['pdf']['1.311_0.811'])
@@ -287,7 +292,7 @@ for model,mod_index in zip(files_to_treat.keys(),range(13)):
        	#plt.show()
         #asdasd
 
-
+plt.show()
 
 
 

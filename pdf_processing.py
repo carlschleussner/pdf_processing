@@ -269,11 +269,12 @@ class PDF_Processing(object):
             for key in self._periods:
                 self._distributions[region][key]=self._data_sliced[key][np.isfinite(mask)].values.flatten()
 
-    def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',bin_range=None,no_hist_bins=256,range_scaling_factor=1,absolute_scaling=False,relative_diff=False):
+    def derive_pdf_difference(self,ref_period,target_period,diff=None,pdf_method='python_silverman',bin_range=None,no_hist_bins=256,range_scaling_factor=1,absolute_scaling=False,relative_diff=False):
         '''
         Derive regional pdf's of differences between the chosen periods.
         ref_period:type str: name of the reference period
         target_period:type str: name of the target period
+        diff:np.array : externally created diff
         pdf_method:type str: method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
         bin_range:type array: bins used for kernel density estimation. If None this will be estimated in the function
         no_hist_bins:type int: number of bins used in histogram method
@@ -287,12 +288,15 @@ class PDF_Processing(object):
         for region in self._distributions.keys():
             if 'pdf' not in self._distributions[region].keys(): self._distributions[region]['pdf']={}
             if 'cdf' not in self._distributions[region].keys(): self._distributions[region]['cdf']={}
+            if 'diff' not in self._distributions[region].keys(): self._distributions[region]['diff']={}
             
              # get diff, relative diff is posible (in %)
-            if relative_diff==False:
-                diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
-            if relative_diff==True:
-                diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
+            if diff==None:
+                if relative_diff==False:
+                    diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
+                if relative_diff==True:
+                    diff=(self._distributions[region][target_period]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
+            self._distributions[region]['diff'][target_period+'_'+ref_period]=diff
 
             # Get or set binning range for uniform analysis
             if bin_range==None:
