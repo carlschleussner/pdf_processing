@@ -53,9 +53,11 @@ class PDF_Processing(object):
         self._data=input_data
 
         mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.pkl'
+        print mask_file
 
         # try to load existing mask
         if os.path.isfile(mask_file) and overwrite==False:
+            print 'mask exists and is not overwriten'
             pkl_file = open(mask_file, 'rb')
             self._masks = pickle.load(pkl_file)
             pkl_file.close()   

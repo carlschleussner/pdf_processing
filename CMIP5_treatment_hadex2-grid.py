@@ -11,22 +11,22 @@ os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
 # #regrid
 # grid='73x96'
 
-# mygrid=open('CMIP5_regrid/'+grid+'.txt','w')
+# mygrid=open('CMIP5/CMIP5_regrid_HadEX2/'+grid+'.txt','w')
 # mygrid.write('gridtype=lonlat\nxsize='+str(96)+'\nysize='+str(73)+'\nxfirst='+str(0.0)+'\nxinc='+str(3.75)+'\nyfirst='+str(-90)+'\nyinc='+str(2.5))
 # mygrid.close()
 
 # all_files=glob.glob('cmip5_Xev_from_Erich_Fischer/*')
 # for file in all_files:
-# 	os.system('cdo remapbil,CMIP5_regrid/'+grid+'.txt '+file+' CMIP5_regrid/'+file.split('/')[-1].replace('.nc','_'+grid+'.nc'))	
+# 	os.system('cdo remapbil,CMIP5/CMIP5_regrid_HadEX2/'+grid+'.txt '+file+' CMIP5/CMIP5_regrid_HadEX2/'+file.split('/')[-1].replace('.nc','_'+grid+'.nc'))	
 
 
 # only 13 models, could be improved!
 if False:
 	files_to_treat={}
-	error_dict={}
+	model_dict={}
 	for var in ['tasmax','tasmin']:
 		for scenario in ['rcp45','historical']:
-			all_files = glob.glob('CMIP5_regrid/'+var+'*'+scenario+'*r1i*')
+			all_files = glob.glob('CMIP5/CMIP5_regrid_HadEX2/'+var+'*'+scenario+'*r1i*')
 			for file in all_files:
 				model=file.split('/')[-1].split('_')[1]
 				if model not in files_to_treat.keys():
@@ -36,63 +36,59 @@ if False:
 
 		for model in files_to_treat.keys():
 			try:
-				os.system('cdo -O mergetime '+files_to_treat[model][var+'_historical']+' '+files_to_treat[model][var+'_rcp45']+' CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc')
-				files_to_treat[model][var+'_merged']='CMIP5_regrid_ensemble_selection/'+var+'_'+model+'_73x96.nc'
+				os.system('cdo -O mergetime '+files_to_treat[model][var+'_historical']+' '+files_to_treat[model][var+'_rcp45']+' CMIP5/CMIP5_regrid_HadEX2_ensemble_selection/'+var+'_'+model+'_73x96.nc')
+				files_to_treat[model][var+'_merged']='CMIP5/CMIP5_regrid_HadEX2_ensemble_selection/'+var+'_'+model+'_73x96.nc'
 			except: 
 				pass
 
 	for model in files_to_treat.keys():
+		model_dict[model]={'errors':''}
 		GMT=glob.glob('../wlcalculator/data/cmip5_ver002/'+model.lower()+'.rcp45.r1i*')
 		if len(GMT)>0:
 			files_to_treat[model]['GMT']=GMT[0]
-		else:
-			error_dict[model]='no GMT - '
 
-		try:
 			nc_in=Dataset(files_to_treat[model]['GMT'],"r")
-
 			# handle time information
 			time=nc_in.variables['time'][:]
 			year=time/12
-
 			# GMT
 			GMT = nc_in.variables['tas_global'][:]	
-
 			ave_window=20
-
 			rmean=GMT.copy()*np.nan
 			for i in range(19,len(rmean)):
 				#print i-ave_window+1,i
 				rmean[i]=GMT[i-ave_window:i].mean()
 			#rmean_dict[ds]=rmean-rmean.ix[2015].values
-
 			try:
 				ref_warming=rmean[np.where(year==2010)[0]][0]
 			except:
 				ref_warming=rmean[np.where(year==2010)[0]]
 			rmean=rmean-ref_warming
 
-			for change in [-0.5,+0.811,+1.311]:
+			for change in [-0.5,+0.311,+0.811,+1.311,+1.811]: 
 				closest=np.nanargmin(abs(rmean-change))
 				print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
 				if np.nanmin(abs(rmean-change))<0.1:
 					files_to_treat[model][change]=year[closest]
+				else:
+					model_dict[model]['errors']+=str(change)+' '
 
-		except:
-			print model,error
+		else:
+			model_dict[model]['errors']+='no GMT - '
 
 
 
-	for model in files_to_treat.keys():
-		if len(files_to_treat[model].keys())<9:
-			if model not in error_dict:
-				error_dict[model]=''
-				error_dict[model]+='missing input - '
+	for model in files_to_treat.keys(): 
 		if len(files_to_treat[model].keys())<10:
-			print model,files_to_treat[model].keys()
+			model_dict[model]['errors']+='missing input - '
 			files_to_treat.pop(model, None)
+		# if len(files_to_treat[model].keys())<12:
+		# 	print model,files_to_treat[model].keys()
+		# 	files_to_treat.pop(model, None)
 
 
+	with open('CMIP5/cmip5_HadEX2_time_slices_and_files.pkl', 'wb') as output:
+	    pickle.dump(files_to_treat, output, pickle.HIGHEST_PROTOCOL)
 
 
 
@@ -148,11 +144,13 @@ if True:
 			ref_period=[1991,2010]
 			target_periods=[]
 			period_names=[]
-			for change in [-0.5,+0.811,+1.311]:
-				end_year=files_to_treat[model][change]
-				print end_year
-				target_periods.append([end_year-19,end_year])
-				period_names.append(str(change))
+			for change in [-0.5,+0.311,+0.811,+1.311,+1.811]:
+				try:
+					end_year=files_to_treat[model][change]
+					target_periods.append([end_year-19,end_year])
+					period_names.append(str(change))
+				except:
+					print change, 'not reached'
 			target_periods.append(ref_period)
 			period_names.append('ref')
 
@@ -183,32 +181,24 @@ if True:
 			cmip5_dict[model][var].derive_distributions()
 
 			cmip5_dict[model][var].derive_pdf_difference(str(-0.5),'ref',pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+			if str(0.311) in period_names:
+				cmip5_dict[model][var].derive_pdf_difference('ref',str(0.311),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+				if str(0.811) in period_names:
+					cmip5_dict[model][var].derive_pdf_difference(str(0.311),str(0.811),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+					if str(1.311) in period_names:
+						cmip5_dict[model][var].derive_pdf_difference(str(0.811),str(1.311),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+						if str(1.811) in period_names:
+							try:
+								cmip5_dict[model][var].derive_pdf_difference(str(1.311),str(1.811),pdf_method=pdf_method,bin_range=varin_dict[var]['cut_interval'])
+							except:
+								pass
 				
 
-N_model=len(files_to_treat.keys())
-	
-for var in ['TXx','TNn']:
-	f,pl=plt.subplots(nrows=2,ncols=3,figsize=(10,4))
-	pplot=pl.flatten()
-	for region,reg_index in zip(['global','Europe','Asia','North_America','Russia'],range(5)):
-		PDFs=np.zeros([512,N_model])*np.nan
-		for model,mod_index in zip(files_to_treat.keys(),range(N_model)):
-			pplot[reg_index].plot(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],cmip5_dict[model][var]._distributions[region]['pdf']['ref_-0.5'],linewidth=0.3,color='gray')
-			PDFs[:,mod_index]=cmip5_dict[model][var]._distributions[region]['pdf']['ref_-0.5']
-
-		pl95=np.percentile(PDFs,95,axis=1)
-		pl5=np.percentile(PDFs,5,axis=1)
-		pplot[reg_index].fill_between(cmip5_dict[model][var]._distributions[region]['pdf']['xaxis'],
-                            pl95,pl5,color='blue',
-                                  alpha=0.25)
-
-		pplot[reg_index].set_title(region.replace('_',' '))
-		pplot[reg_index].set_xlabel(varin_dict[var]['unit'])
-	pplot[reg_index+1].axis('off')
-	plt.tight_layout()
-	plt.savefig('../CMIP5_'+var+'_.png',dpi=300)
-	plt.clf()
-#plt.show()
+		
+	with open('../CMIP5/varoutdict_cmip5_hadex2-grid.pkl', 'wb') as output:
+	    pickle.dump(cmip5_dict, output, pickle.HIGHEST_PROTOCOL)
+	    
+    
 
 
 
