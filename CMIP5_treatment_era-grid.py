@@ -20,10 +20,10 @@ os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
 # 	os.system('cdo remapbil,CMIP5/CMIP5_regrid_ERA/'+grid+'.txt '+file+' CMIP5/CMIP5_regrid_ERA/'+file.split('/')[-1].replace('.nc','_'+grid+'.nc'))	
 
 
-# only 13 models, could be improved!
-if False:
+# only few models, could be improved!
+if True:
 	files_to_treat={}
-	error_dict={}
+	model_dict={}
 	for var in ['tasmax','tasmin']:
 		for scenario in ['rcp45','historical']:
 			all_files = glob.glob('CMIP5/CMIP5_regrid_ERA/'+var+'*'+scenario+'*r1i*')
@@ -42,54 +42,45 @@ if False:
 				pass
 
 	for model in files_to_treat.keys():
+		model_dict[model]={'errors':''}
 		GMT=glob.glob('../wlcalculator/data/cmip5_ver002/'+model.lower()+'.rcp45.r1i*')
 		if len(GMT)>0:
 			files_to_treat[model]['GMT']=GMT[0]
-		else:
-			error_dict[model]='no GMT - '
 
-		try:
 			nc_in=Dataset(files_to_treat[model]['GMT'],"r")
-
 			# handle time information
 			time=nc_in.variables['time'][:]
 			year=time/12
-
 			# GMT
 			GMT = nc_in.variables['tas_global'][:]	
-
 			ave_window=20
-
 			rmean=GMT.copy()*np.nan
 			for i in range(19,len(rmean)):
 				#print i-ave_window+1,i
 				rmean[i]=GMT[i-ave_window:i].mean()
 			#rmean_dict[ds]=rmean-rmean.ix[2015].values
-
 			try:
 				ref_warming=rmean[np.where(year==2010)[0]][0]
 			except:
 				ref_warming=rmean[np.where(year==2010)[0]]
 			rmean=rmean-ref_warming
 
-			for change in [-0.5,+0.811,+1.311]:
+			for change in [-0.5,+0.311,+0.811,+1.311,+1.811]: 
 				closest=np.nanargmin(abs(rmean-change))
 				print change,np.nanmin(abs(rmean-change)),year[closest],rmean[closest]
 				if np.nanmin(abs(rmean-change))<0.1:
 					files_to_treat[model][change]=year[closest]
+				else:
+					model_dict[model]['errors']+=str(change)+' '
 
-		except:
-			print model
+		else:
+			model_dict[model]['errors']+='no GMT - '
 
 
 
-	for model in files_to_treat.keys():
-		if len(files_to_treat[model].keys())<9:
-			if model not in error_dict:
-				error_dict[model]=''
-				error_dict[model]+='missing input - '
+	for model in files_to_treat.keys(): 
 		if len(files_to_treat[model].keys())<10:
-			print model,files_to_treat[model].keys()
+			model_dict[model]['errors']+='missing input - '
 			files_to_treat.pop(model, None)
 
 
@@ -149,7 +140,7 @@ if True:
 			ref_period=[1991,2010]
 			target_periods=[]
 			period_names=[]
-			for change in [-0.5,+0.811,+1.311]:
+			for change in [-0.5]:
 				end_year=files_to_treat[model][change]
 				print end_year
 				target_periods.append([end_year-19,end_year])

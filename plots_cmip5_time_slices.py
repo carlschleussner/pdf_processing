@@ -45,21 +45,21 @@ with open('../CMIP5/varoutdict_cmip5_hadex2-grid.pkl', 'rb') as input:
 
 
 time_slice_dict={
-  'ref_-0.5':{'name':'ref vs -0.5'},
-  '0.811_0.311':{'name':'+1.5 vs +1'},
-  '1.311_0.811':{'name':'+2 vs +1.5'},
-  '1.811_1.311':{'name':'+2.5 vs +2'}
+  1:{'name':'ref_-0.5','longname':'ref vs -0.5'},
+  2:{'name':'0.811_0.311','longname':'+1.5 vs +1'},
+  3:{'name':'1.311_0.811','longname':'+2 vs +1.5'},
+  4:{'name':'1.811_1.311','longname':'+2.5 vs +2'}
 }
 
 f,pl=plt.subplots(nrows=4,ncols=2,figsize=(10,12))
 pplot=pl.flatten()
 count=0
-for time_slice in time_slice_dict.keys():
+for ID in time_slice_dict.keys():
 	for var in ['TXx','TNn']:
 		PDFs=np.zeros([512,N_model])*np.nan
 		for model,mod_index in zip(files_to_treat.keys(),range(N_model)):
 			try:
-				pplot[count].plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf'][time_slice],linewidth=0.3,color='gray')
+				pplot[count].plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf'][time_slice_dict[ID]['name']],linewidth=0.3,color='gray')
 				PDFs[:,mod_index]=cmip5_dict[model][var]._distributions['global']['pdf'][time_slice]
 			except:
 				print time_slice
@@ -74,7 +74,7 @@ for time_slice in time_slice_dict.keys():
 		pplot[count].set_ylim((0,0.013))
 
 		if (-1)**count>0:
-			pplot[count].set_ylabel(time_slice_dict[time_slice]['name'])
+			pplot[count].set_ylabel(time_slice_dict[ID]['longname'])
 			pplot[count].set_yticks([], [])
 		if (-1)**count<0:
 			pplot[count].yaxis.tick_right()

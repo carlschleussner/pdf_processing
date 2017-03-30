@@ -20,8 +20,8 @@ os.chdir('/Users/peterpfleiderer/Documents/Projects/0p5_observed/')
 # 	os.system('cdo remapbil,CMIP5/CMIP5_regrid_HadEX2/'+grid+'.txt '+file+' CMIP5/CMIP5_regrid_HadEX2/'+file.split('/')[-1].replace('.nc','_'+grid+'.nc'))	
 
 
-# only 13 models, could be improved!
-if False:
+# only few models, could be improved!
+if True:
 	files_to_treat={}
 	model_dict={}
 	for var in ['tasmax','tasmin']:
@@ -42,7 +42,7 @@ if False:
 				pass
 
 	for model in files_to_treat.keys():
-		model_dict[model]={'errors':''}
+		model_dict[model]=[]
 		GMT=glob.glob('../wlcalculator/data/cmip5_ver002/'+model.lower()+'.rcp45.r1i*')
 		if len(GMT)>0:
 			files_to_treat[model]['GMT']=GMT[0]
@@ -71,26 +71,32 @@ if False:
 				if np.nanmin(abs(rmean-change))<0.1:
 					files_to_treat[model][change]=year[closest]
 				else:
-					model_dict[model]['errors']+=str(change)+' '
+					model_dict[model]+=[change]
 
 		else:
-			model_dict[model]['errors']+='no GMT - '
+			model_dict[model]+=['no GMT']
 
 
 
 	for model in files_to_treat.keys(): 
 		if len(files_to_treat[model].keys())<10:
-			model_dict[model]['errors']+='missing input - '
+			model_dict[model]+=['missing input']
 			files_to_treat.pop(model, None)
-		# if len(files_to_treat[model].keys())<12:
-		# 	print model,files_to_treat[model].keys()
-		# 	files_to_treat.pop(model, None)
 
 
 	with open('CMIP5/cmip5_HadEX2_time_slices_and_files.pkl', 'wb') as output:
 	    pickle.dump(files_to_treat, output, pickle.HIGHEST_PROTOCOL)
 
+data_missing=''
+ensemble=''
+for model in model_dict.keys():
+	if 'missing input' in model_dict[model]:
+		data_missing+=model+' '
+	else:
+		ensemble+=model+' '
 
+
+adsasd
 
 # IMPORT AND CONFIG 
 import numpy as np

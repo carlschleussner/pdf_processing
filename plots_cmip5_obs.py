@@ -53,28 +53,28 @@ with open('../CMIP5/varoutdict_cmip5_hadex2-grid.pkl', 'rb') as input:
 # cmip5 - obs
 f=plt.figure(figsize=(4,4))
 for var in ['TXx','TNn']:
-	PDFs=np.zeros([512,N_model])*np.nan
-	for model,mod_index in zip(files_to_treat.keys(),range(N_model)):
-		plt.plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5'],linewidth=0.3,color='gray')
-		PDFs[:,mod_index]=cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5']
+  PDFs=np.zeros([512,N_model])*np.nan
+  for model,mod_index in zip(files_to_treat.keys(),range(N_model)):
+    plt.plot(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5'],linewidth=0.3,color='gray')
+    PDFs[:,mod_index]=cmip5_dict[model][var]._distributions['global']['pdf']['ref_-0.5']
 
-	pl95=np.percentile(PDFs,95,axis=1)
-	pl5=np.percentile(PDFs,5,axis=1)
-	plt.fill_between(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],
-                        pl95,pl5,color='gray',
-                              alpha=0.25)
+  pl95=np.percentile(PDFs,95,axis=1)
+  pl5=np.percentile(PDFs,5,axis=1)
+  plt.fill_between(cmip5_dict[model][var]._distributions['global']['pdf']['xaxis'],
+                      pl95,pl5,color='gray',
+                            alpha=0.25)
 
-	for dataset in ['HadEX2','GHCNDEX']:
-		plt.plot(varoutdict_obs[dataset][var]._distributions['global']['pdf']['xaxis'],
-                  varoutdict_obs[dataset][var]._distributions['global']['pdf']['Recent_ref'],
-                  label=dataset,
-                  color=colordict[dataset],
-                  linewidth=2)
+  for dataset in ['HadEX2','GHCNDEX']:
+    plt.plot(varoutdict_obs[dataset][var]._distributions['global']['pdf']['xaxis'],
+                varoutdict_obs[dataset][var]._distributions['global']['pdf']['Recent_ref'],
+                label=dataset,
+                color=colordict[dataset],
+                linewidth=2)
 
-
-	plt.xlabel(varin_dict[var]['unit'])
-	plt.savefig('../CMIP5/CMIP5_'+var+'_obs.png',dpi=300)
-	plt.clf()
+  plt.title('Observation')
+  plt.xlabel(varin_dict[var]['unit'])
+  plt.savefig('../CMIP5/CMIP5_'+var+'_obs.png',dpi=300)
+  plt.clf()
 
 
 
