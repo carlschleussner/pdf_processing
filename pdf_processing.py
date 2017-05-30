@@ -2,8 +2,9 @@
 CLASS TO DERIVE REGIONAL AGGREGATION, PDF GENERATION AND KS TEST
 FOLLOWING THE METHODOLOGY DEPLOYED
 Schleussner, C.-F. et al.  ESD (2016)
-by Carl Schleussner, Climate Analytics
+by Carl Schleussner and Peter Pfleiderer, Climate Analytics
 carl.schleussner@climateanalytics.org
+peter.pfleiderer@climateanalytics.org
 """
 import numpy as np
 import netCDF4 as net
@@ -285,14 +286,13 @@ class PDF_Processing(object):
         relative_diff:type Boolean: if True, relative differences are considered
         '''
 
-
         # derive histogram pdf for pairwise differences  
         for region in self._distributions.keys():
             if 'pdf' not in self._distributions[region].keys(): self._distributions[region]['pdf']={}
             if 'cdf' not in self._distributions[region].keys(): self._distributions[region]['cdf']={}
             if 'diff' not in self._distributions[region].keys(): self._distributions[region]['diff']={}
             
-            # get diff, relative diff is posible (in %)
+            # get diff, relative diff is possible (in %)
             if relative_diff==False:
                 diff=self._distributions[region][target_period]-self._distributions[region][ref_period]
             if relative_diff==True:
@@ -462,7 +462,36 @@ class PDF_Processing(object):
         #         return r,np.nan
 
 
-    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
+    def ks_test(self,period_1,period_2,ref_period='ref',region='global',sign_level=95.,relative_diff=False):
+        '''
+        Derive Kolmogorov-Smirnoff test for two different time periods  relative to a reference period 
+        This tests whether 2 samples are drawn from the same distribution. 
+        This is the two-sided test, one-sided tests are not implemented.
+        The test uses the two-sided asymptotic Kolmogorov-Smirnov distribution.
+        If the K-S statistic is small or the p-value is high, then we cannot reject the hypothesis that the distributions of the two samples are the same.
+
+        period_1:type str: name of the first target period
+        period_2:type str: name of the second target period
+        ref_period:type str: name of the reference period
+        region:type str: name of region of interest for KS-test
+        relative_diff: Boolean, if True, differences are derived relative to the reference period (i.e. for precipitation)
+        returns: result of Kolmogorov-Smirnoff test
+        '''
+        if relative_diff==False:
+            diff_1=self._distributions[region][period_1]-self._distributions[region][ref_period]
+            diff_2=self._distributions[region][period_2]-self._distributions[region][ref_period]
+        if relative_diff==True:
+            diff_1=(self._distributions[region][period_1]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
+            diff_2=(self._distributions[region][period_2]-self._distributions[region][ref_period])/self._distributions[region][ref_period]*100
+
+        ks_test=ks_2samp(diff_1,diff_2)
+        if ks_test[1]<=1-sign_level/100:
+            print 'Distributions for '+period_1+' and '+period_2+' are significantly different at the '+str(sign_level)+' % level following a two-tailed Kolmogorov-Smirnoff test'
+        return ks_test[1]
+
+
+    # def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
+    def plot_map(self,to_plot,color_bar=True,color_label=None,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
         '''
         Plot maps of inputted data. 
         color_bar:type logical: if True, color-scale is plotted besides the map
