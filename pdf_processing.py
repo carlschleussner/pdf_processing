@@ -491,7 +491,7 @@ class PDF_Processing(object):
 
 
     # def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
-    def plot_map(self,to_plot,color_bar=True,color_label=None,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
+    def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.coolwarm,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
         '''
         Plot maps of inputted data. 
         color_bar:type logical: if True, color-scale is plotted besides the map
