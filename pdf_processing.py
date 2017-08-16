@@ -53,18 +53,19 @@ class PDF_Processing(object):
         lon=input_data.lon
         self._data=input_data
 
-        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.pkl'
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.nc'
         print mask_file
 
         # try to load existing mask
         if os.path.isfile(mask_file) and overwrite==False:
             print 'mask exists and is not overwriten'
-            pkl_file = open(mask_file, 'rb')
-            self._masks = pickle.load(pkl_file)
-            pkl_file.close()   
+            self._masks = da.read_nc(mask_file)['mask']          
+
 
         # compute mask if no mask file found
         else:
+            # create new dimarray to store global mask
+            self._masks=da.DimArray(axes=[np.asarray([maskname]),lat,lon],dims=['region','lat','lon'])
             # full coverage
             # no missing values allowed
             if required_coverage==None:
@@ -127,10 +128,9 @@ class PDF_Processing(object):
             # normalize 
             self._masks[maskname]=maskout/float(maskout[mask].sum())
 
-            # save masks
-            mask_output = open(mask_file, 'wb')
-            pickle.dump(self._masks, mask_output)
-            mask_output.close()
+            # save as dimarray
+            ds=da.Dataset({'mask':self._masks})
+            ds.write_nc(mask_file, mode='w')
 
     def derive_regional_masking(self,shift_lon=0.0,region_polygons=None,region_type='continental',dataset='',overwrite=False):
         '''
@@ -143,20 +143,25 @@ class PDF_Processing(object):
         mask_file:type string: location of masks (from mask_for_ref_period_data_coverage())
         '''
 
+        if hasattr(self,'_masks')==False:
+            print 'please create a global mask using "mask_for_ref_period_data_coverage()" before creating regional masks'
+            return 0
+
         input_data=self._data
         lat=input_data.lat
         lon=input_data.lon
 
-        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.pkl'
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.nc'
         print mask_file
 
         # try to load existing mask
         if os.path.isfile(mask_file) and overwrite==False:
-            pkl_file = open(mask_file, 'rb')
-            self._masks = pickle.load(pkl_file)
-            pkl_file.close()    
+            self._masks = da.read_nc(mask_file)['mask']
 
         else:
+            # create temporary dimarray ro store new masks
+            tmp_region_masks=da.DimArray(axes=[np.asarray(list(region_polygons.keys())),lat,lon],dims=['region','lat','lon'])
+
             # get information about grid of input data
             lat = input_data.lat
             lon = input_data.lon.squeeze()+shift_lon
@@ -213,17 +218,12 @@ class PDF_Processing(object):
                         output=np.roll(output,shift,axis=1)
                         maskout=input_data.ix[0,:,:].copy()*np.nan
                         maskout.ix[:,:]=output[:,:]
-                        self._masks[region]=maskout
+                        tmp_region_masks[region]=maskout
 
+            self._masks=da.concatenate((self._masks,tmp_region_masks),axis='region')
 
-
-
-                # check step. normaly one tab back
-                # save masks
-                mask_output = open(mask_file, 'wb')
-                pickle.dump(self._masks, mask_output)
-                mask_output.close()
-
+            ds=da.Dataset({'mask':self._masks})
+            ds.write_nc(mask_file, mode='w')
 
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
         '''
