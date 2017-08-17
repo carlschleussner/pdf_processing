@@ -53,7 +53,7 @@ class PDF_Processing(object):
         lon=input_data.lon
         self._data=input_data
 
-        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.nc'
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.nc4'
         print mask_file
 
         # try to load existing mask
@@ -105,8 +105,6 @@ class PDF_Processing(object):
                                     mask[y,x]=0
                         print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
 
-            mask[mask==0]=np.nan
-            mask=np.isfinite(mask)      
 
             # mask ocean cells
             try:
@@ -129,8 +127,10 @@ class PDF_Processing(object):
             self._masks[maskname]=maskout/float(maskout[mask].sum())
 
             # save as dimarray
-            ds=da.Dataset({'mask':self._masks})
-            ds.write_nc(mask_file, mode='w')
+            ds = da.open_nc(mask_file, mode='w')
+            ds['mask'] = self._masks
+            ds.close()
+
 
     def derive_regional_masking(self,shift_lon=0.0,region_polygons=None,region_type='continental',dataset='',overwrite=False):
         '''
@@ -151,7 +151,7 @@ class PDF_Processing(object):
         lat=input_data.lat
         lon=input_data.lon
 
-        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.nc'
+        mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_'+region_type+'_masks.nc4'
         print mask_file
 
         # try to load existing mask
