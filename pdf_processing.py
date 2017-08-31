@@ -132,11 +132,10 @@ class PDF_Processing(object):
             ds.close()
 
 
-    def derive_regional_masking(self,shift_lon=0.0,region_polygons=None,region_type='continental',dataset='',overwrite=False):
+    def derive_regional_masking(self,region_polygons=None,region_type='continental',dataset='',overwrite=False):
         '''
         Derive regional masks
         The resulting masks can directly taken as weights for the distribution analysis. 
-        shift_lon:type float: longitude shift that is required to transform the lon axis of input_data to -180 to 180
 
         # changed region_polygons!!!! for SREX i used different region_polygons. now they have to be directly Polygons!!!
         region_polygons:type dict: the polygons defining regions
@@ -164,7 +163,14 @@ class PDF_Processing(object):
 
             # get information about grid of input data
             lat = input_data.lat
-            lon = input_data.lon.squeeze()+shift_lon
+            lon = input_data.lon
+
+            # automatically guesses the shift between grid and polygons. could be a problem
+            if max(lon)>200:    shift_lon=-180.0
+            else:               shift_lon=0.0   
+
+            lon += shift_lon
+
             nx = len(lon)
             ny = len(lat)
 
@@ -194,14 +200,18 @@ class PDF_Processing(object):
                 print region
                 poly=region_polygons[region]
                 overlap = np.zeros((ny,nx))
+
+                x,y=poly.exterior.xy
+                ext_poly = Polygon([(min(x),min(y)),(min(x),max(y)),(max(x),max(y)),(max(x),min(y))])
                 for i in range(nx):
                     for j in range(ny):
-                        # check whether data exists in grid cell
-                        if np.isfinite(np.roll(self._masks['global'],shift,axis=1)[j,i]):
-                            # get fraction of grid-cell covered by polygon
-                            intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
-                            # multiply overlap with latitude weighting
-                            overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
+                        if  grid_polygons[i,j].intersects(ext_poly):
+                            # check whether data exists in grid cell
+                            if np.isfinite(np.roll(self._masks['global'],shift,axis=1)[j,i]):
+                                # get fraction of grid-cell covered by polygon
+                                intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
+                                # multiply overlap with latitude weighting
+                                overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
 
                 # renormalize overlap to get sum(mask)=1
                 overlap_zwi=overlap.copy()
