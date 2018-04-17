@@ -232,8 +232,41 @@ class PDF_Processing(object):
 
             self._masks=da.concatenate((self._masks,tmp_region_masks),axis='region')
 
-            ds=da.Dataset({'mask':self._masks})
-            ds.write_nc(mask_file, mode='w')
+            ds = da.open_nc(mask_file, mode='w')
+            ds['mask'] = self._masks
+            ds['mask'].units = 'nA'
+            ds.axes['lon'].units = 'deg east'
+            ds.axes['lat'].units = 'deg south'
+            ds.close()
+
+            if overwrite:
+                os.system('rm '+mask_file)
+                nc_out=net.Dataset(mask_file.replace('.nc','___.nc'),"w")
+
+                nc_out.createDimension('lat', len(self._masks.lat))
+                nc_out.createDimension('lon', len(self._masks.lon))
+                nc_out.createDimension('region', len(self._masks.region))
+
+                outVar = nc_out.createVariable('lat', 'f', ('lat',))
+                outVar.units='deg south'
+                outVar[:] = self._masks.lat[:]
+
+                outVar = nc_out.createVariable('lon', 'f', ('lon',))
+                outVar.units='deg east'
+                outVar[:] = self._masks.lon[:]
+
+                outVar = nc_out.createVariable('region', 'f', ('region',))
+                outVar.region_names = ', '.join([str(index)+': '+region for index,region in zip(range(len(self._masks.region)),self._masks.region)])
+                outVar[:]= range(len(self._masks.region))
+
+                outVar = nc_out.createVariable('mask', 'f', ('region','lat','lon',))
+                outVar[:] = np.asarray(self._masks)
+
+                nc_out.close()
+
+
+
+
 
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
         '''
