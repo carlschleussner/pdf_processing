@@ -351,6 +351,7 @@ class PDF_Processing(object):
 
 
             if pdf_method=='python_silverman':
+                print(diff)
                 pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',region='global',method='python')
                 print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
                 # bin x-axis is left-centered. Concert to centered
