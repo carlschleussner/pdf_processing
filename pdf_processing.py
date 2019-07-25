@@ -259,7 +259,7 @@ class PDF_Processing(object):
                         maskout.ix[:,:]=output[:,:]
                         tmp_region_masks[region]=maskout
 
-            self._masks=da.concatenate((self._masks,tmp_region_masks),axis='region')
+            self._masks=da.concatenate((self._masks,tmp_region_masks),axis='region', align=True)
 
             ds = da.open_nc(mask_file, mode='w')
             ds['mask'] = self._masks
