@@ -1,56 +1,83 @@
-"""
-CLASS TO DERIVE REGIONAL AGGREGATION, PDF GENERATION AND KS TEST
-FOLLOWING THE METHODOLOGY DEPLOYED
+'''
+Class to derive regional aggregation, pdf generation and ks test
+
+Following the methodology deployed in:
 Schleussner, C.-F. et al.  ESD (2016)
+
 by Carl Schleussner and Peter Pfleiderer, Climate Analytics
 carl.schleussner@climateanalytics.org
 peter.pfleiderer@climateanalytics.org
-"""
+'''
+
 import numpy as np
 import netCDF4 as net
-import sys
+import sys,os
 #sys.path.append('/home/carls/git_repos')
 import dimarray as da
-import itertools
-import glob
-import datetime
-import pickle
-import os
+import itertools,glob,datetime,pickle
 import random as random
 from weighted_kde import gaussian_kde
 from six import string_types
-from mpl_toolkits.basemap import Basemap
 from shapely.geometry import Polygon, MultiPolygon
 import matplotlib.pylab as plt
 from scipy.stats import ks_2samp #KS-Test
-
+import cartopy
+import cartopy.crs as ccrs
 
 class PDF_Processing(object):
     def __init__(self,variable_name,working_dir='./'):
-        '''
+        """
         Initialize an instance of the PDF_Processing
-        variable_name:type str: Variable name
-        working_dir:type str: path to current working directory, where data would be stored as applicable
-        '''
+
+        Parameters
+        ----------
+            variable_name: str
+                Variable name
+            working_dir: str
+                path to current working directory, where data would be stored as applicable
+        """
         self._var = variable_name
         self._working_dir = working_dir
         self._masks={}
 
-    def mask_for_ref_period_data_coverage(self,input_data,ref_period,maskname='global',check_ref_period_only=True,target_periods=None,landmask=None,required_coverage=None,dataset='',overwrite=False):
+    def mask_for_ref_period_data_coverage(self, input_data, ref_period, maskname='global', check_ref_period_only=True, target_periods=None, landmask=None, required_coverage=None, dataset='', overwrite=False):
         '''
-        Grid cell level averaging for different periods along time axis
-        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
-        ref_period:type tuple: [startyear,endyear]
-        maskname:type list : generates mask for start of reference period. Default: 'global' for first year of reference period
-        check_ref_period_only: For observations, data gaps may exist also for the reference period. False: All years investigated will be checked.
-        target_periods: Target period. Only relevant if  check_ref_period_only== True
-        landmask:type np.array on lat-lon grid with 0 for ocean: This mask can be used to ignore ocean cells
-        required_coverage:type None or float(0-1): if None: no missings allowed. If float: ratio off missing values per grid-cell allowed
-        dataset:type string: given name of the dataset
-        Generates data_frame mask
+        Grid cell level averaging for different periods along time axis. Generates data_frame mask
+
+        Parameters
+        ----------
+            input_data: dimarray
+                dimarray with annual variable named 'data' and a 'year' -axis
+            ref_period: tuple
+                [startyear,endyear]
+            maskname: str, default="global"
+                generates mask for start of reference period. Default: 'global' for first year of reference period
+            check_ref_period_only: bool
+                For observations, data gaps may exist also for the reference period. False: All years investigated will be checked.
+            target_periods: list
+                Target period. Only relevant if  check_ref_period_only== True
+            landmask: np.array
+                on lat-lon grid with 0 for ocean: This mask can be used to ignore ocean cells
+            required_coverage: None or float(0-1)
+                if None: no missings allowed. If float: ratio off missing values per grid-cell allowed
+            dataset: string
+                given name of the dataset
+
+        Returns
+        -------
+        bool
+            True if successful, False otherwise.
         '''
+
+        # automatically guesses the shift between grid and polygons. could be a problem
         lat=input_data.lat
         lon=input_data.lon
+        if max(lon)>180:
+            above_180 = np.where(lon>180)[0]
+            lon[above_180] -= 360
+            lon = np.roll(lon,len(above_180))
+            input_data = da.DimArray(np.roll(input_data.values,len(above_180),axis=-1), axes=[input_data.time, lat, lon], dims=['time','lat','lon'])
+
         self._data=input_data
 
         mask_file='support/'+str(len(lat))+'x'+str(len(lon))+'_'+dataset+'_'+self._var+'_masks.nc4'
@@ -105,32 +132,37 @@ class PDF_Processing(object):
                                     mask[y,x]=0
                         print 'No of non-NAN grid cells in Mask over Ref period and target period ',tp,' : ', np.sum(mask)
 
-
             # mask ocean cells
-            try:
-                landmask[landmask!=0]=1
-                landmask[landmask==0]=np.nan
-                mask*=np.isfinite(landmask)
-            except:
+            if landmask is not None:
+                if max(landmask.lon)>180:
+                    above_180 = np.where(landmask.lon>180)[0]
+                    landmask = np.roll(landmask,len(above_180),axis=-1)
+
+                landmask[np.isfinite(landmask)==False]=0
+                mask*=landmask
+            else:
                 print 'no landmask used'
 
-
-            maskout=input_data[ref_period[0]].copy()*np.nan
 
             # Derive land area weighting (For kernel estimation)
             lat_weight=input_data[ref_period[0]].copy()
             for l in lat_weight.lon:
                 lat_weight[:,l]=np.cos(np.radians(lat_weight.lat))
 
-            maskout[mask]=lat_weight[mask]
+            mask[mask==0] = np.nan
+            maskout=lat_weight * mask
+
+
             # normalize
-            self._masks[maskname]=maskout/float(maskout[mask].sum())
+            self._masks[maskname]=maskout/float(np.nansum(maskout))
 
             # save as dimarray
+            print(mask_file)
             ds = da.open_nc(mask_file, mode='w')
             ds['mask'] = self._masks
             ds.close()
 
+            return(True)
 
     def derive_regional_masking(self,region_polygons=None,region_type='continental',dataset='',overwrite=False):
         '''
@@ -138,8 +170,17 @@ class PDF_Processing(object):
         The resulting masks can directly taken as weights for the distribution analysis.
 
         # changed region_polygons!!!! for SREX i used different region_polygons. now they have to be directly Polygons!!!
-        region_polygons:type dict: the polygons defining regions
-        mask_file:type string: location of masks (from mask_for_ref_period_data_coverage())
+
+        Parameters
+        ----------
+            region_polygons:dict
+                the polygons defining regions
+            mask_file:string
+                location of masks (from :meth:`mask_for_ref_period_data_coverage`)
+            dataset:str,default=""
+                name of the dataset
+            overwrite,bool,default=False
+                overwrite existing masks. If False, existing masks are loaded if available
         '''
 
         if hasattr(self,'_masks')==False:
@@ -165,12 +206,6 @@ class PDF_Processing(object):
             lat = input_data.lat
             lon = input_data.lon
 
-            # automatically guesses the shift between grid and polygons. could be a problem
-            if max(lon)>200:    shift_lon=-180.0
-            else:               shift_lon=0.0
-
-            lon += shift_lon
-
             nx = len(lon)
             ny = len(lat)
 
@@ -191,11 +226,6 @@ class PDF_Processing(object):
                     grid_polygons[i,j] = Polygon([(x1,y1),(x1,y2),(x2,y2),(x2,y1)])
                     #grid_polygons[i,j] = Polygon([(y1,x1),(y1,x2),(y2,x2),(y2,x1)])
 
-            # since the lon axis has been shifted, masks and outputs will have to be shifted as well. This shift is computed here
-            lon=lon-shift_lon
-            shift = len(lon)-np.where(lon==lon[0]-shift_lon)[0][0]
-
-
             for region in region_polygons.keys():
                 print region
                 poly=region_polygons[region]
@@ -207,7 +237,7 @@ class PDF_Processing(object):
                     for j in range(ny):
                         if  grid_polygons[i,j].intersects(ext_poly):
                             # check whether data exists in grid cell
-                            if np.isfinite(np.roll(self._masks['global'],shift,axis=1)[j,i]):
+                            if np.isfinite(self._masks['global'].ix[j,i]):
                                 # get fraction of grid-cell covered by polygon
                                 intersect = grid_polygons[i,j].intersection(poly).area/grid_polygons[i,j].area*poly.area
                                 # multiply overlap with latitude weighting
@@ -225,7 +255,6 @@ class PDF_Processing(object):
                     # only save mask if more than 30 grid cells available
                     if len(np.where(np.isfinite(output))[0])>30:
                         # shift back to original longitudes
-                        output=np.roll(output,shift,axis=1)
                         maskout=input_data.ix[0,:,:].copy()*np.nan
                         maskout.ix[:,:]=output[:,:]
                         tmp_region_masks[region]=maskout
@@ -241,7 +270,7 @@ class PDF_Processing(object):
 
             if overwrite:
                 os.system('rm '+mask_file)
-                nc_out=net.Dataset(mask_file.replace('.nc','___.nc'),"w")
+                nc_out=net.Dataset(mask_file,"w")
 
                 nc_out.createDimension('lat', len(self._masks.lat))
                 nc_out.createDimension('lon', len(self._masks.lon))
@@ -264,19 +293,22 @@ class PDF_Processing(object):
 
                 nc_out.close()
 
-
-
-
-
     def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
         '''
-        Grid cell level averaging for different periods along time axis
-        input_data:type dimarray: dimarray with annual variable named 'data' and a 'year' -axis
-        ref_period:type tuple: [startyear,endyear]
-        target_periods:type list of tuples: [[startyear,endyear],...]
-        period_names:type list : names of reference periods
-        mask_for_ref_period: type str : name of mask to be deployed, default='global'. If set to None, no masking will be used
-        Generates data_frame for each ref and target period
+        Grid cell level averaging for different periods along time axis. Generates data_frame for each ref and target period.
+
+        Parameters
+        ----------
+            input_data:dimarray
+                dimarray with annual variable named 'data' and a 'year' -axis
+            ref_period:tuple
+                [startyear,endyear]
+            target_periods:list of tuples
+                [[startyear,endyear],...]
+            period_names:list
+                names of reference periods
+            mask_for_ref_period:str,default="global"
+                name of mask to be deployed. If set to None, no masking will be used
         '''
 
         input_data=self._data
@@ -302,10 +334,11 @@ class PDF_Processing(object):
         self._data_sliced=da_time_sliced
         self._periods=da_time_sliced.period
 
-
     def derive_distributions(self):
         '''
         Derive distributions for different regions. Here the masks computed in mask_for_ref_period_data_coverage() and derive_regional_masking() are used.
+
+        Requires :meth:`derive_time_slices` to be executed beforehand.
         '''
         self._distributions={}
         for region in self._masks.region:
@@ -318,15 +351,29 @@ class PDF_Processing(object):
     def derive_pdf_difference(self,ref_period,target_period,pdf_method='python_silverman',bin_range=None,no_hist_bins=256,range_scaling_factor=1,absolute_scaling=False,relative_diff=False):
         '''
         Derive regional pdf's of differences between the chosen periods.
-        ref_period:type str: name of the reference period
-        target_period:type str: name of the target period
-        diff:np.array : externally created diff
-        pdf_method:type str: method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
-        bin_range:type array: bins used for kernel density estimation. If None this will be estimated in the function
-        no_hist_bins:type int: number of bins used in histogram method
-        absolute_scaling:type Boolean: If True, the bin_range is going to be symmetric
-        range_scaling_factor:type float: factor setting the range for kernel density estimation
-        relative_diff:type Boolean: if True, relative differences are considered
+
+        Requires :meth:`derive_distributions` to be executed beforehand.
+
+        Parameters
+        ----------
+            ref_period:str
+                name of the reference period
+            target_period:str
+                name of the target period
+            diff:np.array
+                externally created diff
+            pdf_method:str
+                method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
+            bin_range:array
+                bins used for kernel density estimation. If None this will be estimated in the function
+            no_hist_bins:int
+                number of bins used in histogram method
+            absolute_scaling:Boolean
+                If True, the bin_range is going to be symmetric
+            range_scaling_factor:float
+                factor setting the range for kernel density estimation
+            relative_diff:Boolean
+                if True, relative differences are considered
         '''
 
         # derive histogram pdf for pairwise differences
@@ -351,7 +398,7 @@ class PDF_Processing(object):
 
 
             if pdf_method=='python_silverman':
-                pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',region='global',method='python')
+                pdf_der,no_nans=self.kernel_density_estimation(diff,bin_range,bw='silverman',region=region,method='python')
                 print 'Warning, NaNs in difference kernel estimation. No of NaNs:',no_nans
                 # bin x-axis is left-centered. Concert to centered
                 self._distributions[region]['pdf']['xaxis']=pdf_der[:,0]
@@ -374,12 +421,16 @@ class PDF_Processing(object):
                 print 'Method not implemented', pdf_method
                 break
 
-
     def bootstrapping(self,bs_range,nShuff):
         '''
         Create randomly shuffled time slices
-        bs_range:type list(int,int): limiting years for shuffling.
-        nShuff:type int: number of required shuffled time slices
+
+        Parameters
+        ----------
+            bs_range:list(int,int)
+                limiting years for shuffling.
+            nShuff:int
+                number of required shuffled time slices
         '''
         for region in self._masks.region:
             input_data=self._data.copy()[bs_range[0]:bs_range[1]]
@@ -391,13 +442,20 @@ class PDF_Processing(object):
                 mdat = dat[np.where(np.isfinite(mask.flatten()))[0]]
                 self._distributions[region]['shuffled'][i]=mdat
 
-
     def derive_bootstrapped_conf_interval(self,pdf_method='python_silverman',quantiles=[1,5,17,25,50,75,83,95,99],relative_diff=False):
         '''
         Derive confidence intervals for bootstrapped differences
-        pdf_method:type str: method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
-        quantiles:type list of quantile levels (integers in [0,100])
-        relative_diff:type Boolean: if True, relative differences are considered
+
+        Requires :meth:`derive_distributions` and :meth:`bootstrapping` to be executed beforehand.
+
+        Parameters
+        ----------
+            pdf_method:str
+                method used to derive pdf's. 'hist' for histogram; 'python_silverman' for kernel density estimation with Silverman's rule of thumb.
+            quantiles:list
+                list of quantile levels (integers in [0,100])
+            relative_diff:Boolean
+                if True, relative differences are considered
         '''
         for region in self._distributions.keys():
             if self._distributions[region].has_key('pdf')==False:
@@ -440,16 +498,24 @@ class PDF_Processing(object):
                     self._distributions[region]['pdf']['bs_quantiles'][qu]=quant
                     self._distributions[region]['cdf']['bs_quantiles'][qu]=np.asarray([quant[:i].sum() for i in xrange(len(quant))])
 
-
     def kernel_density_estimation(self,diff,cutinterval,bw='silverman',region='global',method='python'):
         '''
         Fit PDFs and CDFs to respective regional functions.
-        data:dataset
-        diff:type array: array on which the kde is applied
-        cutinterval:type tuple : Min/Max range for the PDF
-        bw:type int : smoothing bandwidth to be used. can be a scalar or method for estimation 'scott' or 'silverman' (python only)
-        region:type str : Regional analysis.
-        method:type function name : name of the function below that has to be used. default is python
+
+        Requires :meth:`derive_distributions` and :meth:`derive_pdf_difference` to be executed beforehand.
+
+        Parameters
+        ----------
+            diff:array
+                array on which the kde is applied. Diff is generated by :meth:`derive_pdf_difference`
+            cutinterval:tuple
+                Min/Max range for the PDF
+            bw:int or str,default='silverman'
+                smoothing bandwidth to be used. can be a scalar or method for estimation 'scott' or 'silverman' (python only)
+            region:str,default="global"
+                region to be analyzed
+            method:function name,default="python"
+                name of the function below that has to be used. default is python
         '''
 
         if method=='python':
@@ -468,6 +534,7 @@ class PDF_Processing(object):
             # cutoff outliers
             inside_cutinterval=np.where((diff[diff_nan_filter]>=cutinterval[0]) & (diff[diff_nan_filter]<=cutinterval[1]))[0]
 
+            print(diff.shape,weights.shape)
             kde=gaussian_kde(diff[diff_nan_filter][inside_cutinterval],weights=weights[diff_nan_filter][inside_cutinterval])
             kde.set_bandwidth(bw_method=bw)
             pdf=np.zeros([512,2])
@@ -504,7 +571,6 @@ class PDF_Processing(object):
         #         r=np.loadtxt(rsavestring)
         #         return r,np.nan
 
-
     def ks_test(self,period_1,period_2,ref_period='ref',region='global',sign_level=95.,relative_diff=False):
         '''
         Derive Kolmogorov-Smirnoff test for two different time periods  relative to a reference period
@@ -513,12 +579,25 @@ class PDF_Processing(object):
         The test uses the two-sided asymptotic Kolmogorov-Smirnov distribution.
         If the K-S statistic is small or the p-value is high, then we cannot reject the hypothesis that the distributions of the two samples are the same.
 
-        period_1:type str: name of the first target period
-        period_2:type str: name of the second target period
-        ref_period:type str: name of the reference period
-        region:type str: name of region of interest for KS-test
-        relative_diff: Boolean, if True, differences are derived relative to the reference period (i.e. for precipitation)
-        returns: result of Kolmogorov-Smirnoff test
+        Requires :meth:`derive_distributions` to be executed beforehand.
+
+        Parameters
+        ----------
+            period_1:str
+                name of the first target period
+            period_2:str
+                name of the second target period
+            ref_period:str
+                name of the reference period
+            region:str
+                name of region of interest for KS-test
+            relative_diff
+                Boolean, if True, differences are derived relative to the reference period (i.e. for precipitation)
+
+        Returns
+        -------
+            ks_test[1]: float
+                result of Kolmogorov-Smirnoff test
         '''
         if relative_diff==False:
             diff_1=self._distributions[region][period_1]-self._distributions[region][ref_period]
@@ -532,22 +611,38 @@ class PDF_Processing(object):
             print 'Distributions for '+period_1+' and '+period_2+' are significantly different at the '+str(sign_level)+' % level following a two-tailed Kolmogorov-Smirnoff test'
         return ks_test[1]
 
-
     # def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.plasma,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
     def plot_map(self,to_plot,color_bar=True,color_label=None,color_palette=plt.cm.coolwarm,color_range=None,coastline_width=0.5,limits=[-180,180,-90,90],ax=None,figsize=(8,4),out_file=None,title='',show=True):
         '''
         Plot maps of inputted data.
-        color_bar:type logical: if True, color-scale is plotted besides the map
-        color_label:type str: label of the color-scale
-        color_palette:type plt.cm. object: colors used
-        color_range:type [float,float]: minimal and maximal value on color-scale
-        coastline_width:type float: width of coastlines
-        limits:type [lon_min,lon_max,lat_min,lat_max]: extend of the map
-        ax: subplot:type subplot on which the map will be plotted
-        figsize:type (int,int): size of the saved figure (if saved)
-        out_file:type str: location where the plot is saved. Not saved if None
-        title: str:type title of the plot
-        show: logical:type show the subplot?
+
+        TO BE REPLACED BY CARTOPY FUNCTION
+
+        Parameters
+        ----------
+
+            color_bar:logical
+                if True, color-scale is plotted besides the map
+            color_label:str
+                label of the color-scale
+            color_palette:plt.cm.object
+                colors used
+            color_range:[float,float]
+                minimal and maximal value on color-scale
+            coastline_width:float
+                width of coastlines
+            limits:[lon_min,lon_max,lat_min,lat_max]
+                extend of the map
+            ax:subplot
+                subplot on which the map will be plotted
+            figsize:(int,int)
+                size of the saved figure (if saved)
+            out_file:str
+                location where the plot is saved. Not saved if None
+            title:str
+                title of the plot
+            show:logical
+                show the subplot?
         '''
 
         lat=self._data.lat.copy()
