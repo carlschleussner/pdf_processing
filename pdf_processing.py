@@ -197,7 +197,8 @@ class PDF_Processing(object):
 		# try to load existing mask
 		if os.path.isfile(mask_file) and overwrite==False:
 			print(da.read_nc(mask_file)['mask'])
-			nc_mask = da.read_nc(mask_file)['mask']
+			nc_mask = da.read_nc(mask_file)
+			# print(nc_mask)
 			self._masks = nc_mask['mask']
 			self._masks.region = [st.split(' ')[1] for st in nc_mask['region'].region_names.split(',')]
 
