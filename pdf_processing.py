@@ -197,10 +197,7 @@ class PDF_Processing(object):
 		# try to load existing mask
 		if os.path.isfile(mask_file) and overwrite==False:
 			print(da.read_nc(mask_file)['mask'])
-			nc_mask = da.read_nc(mask_file)
-			# print(nc_mask)
-			self._masks = nc_mask['mask']
-			self._masks.region = [st.split(' ')[1] for st in nc_mask['region'].region_names.split(',')]
+			self._masks = da.read_nc(mask_file)['mask']
 
 		else:
 			# create temporary dimarray ro store new masks
@@ -272,30 +269,30 @@ class PDF_Processing(object):
 			ds.axes['lat'].units = 'deg south'
 			ds.close()
 
-			if overwrite:
-				os.system('rm '+mask_file)
-				nc_out=net.Dataset(mask_file,"w")
-
-				nc_out.createDimension('lat', len(self._masks.lat))
-				nc_out.createDimension('lon', len(self._masks.lon))
-				nc_out.createDimension('region', len(self._masks.region))
-
-				outVar = nc_out.createVariable('lat', 'f', ('lat',))
-				outVar.units='deg south'
-				outVar[:] = self._masks.lat[:]
-
-				outVar = nc_out.createVariable('lon', 'f', ('lon',))
-				outVar.units='deg east'
-				outVar[:] = self._masks.lon[:]
-
-				outVar = nc_out.createVariable('region', 'f', ('region',))
-				outVar.region_names = ', '.join([str(index)+': '+region for index,region in zip(range(len(self._masks.region)),self._masks.region)])
-				outVar[:]= range(len(self._masks.region))
-
-				outVar = nc_out.createVariable('mask', 'f', ('region','lat','lon',))
-				outVar[:] = np.asarray(self._masks)
-
-				nc_out.close()
+			# if overwrite:
+			# 	os.system('rm '+mask_file)
+			# 	nc_out=net.Dataset(mask_file,"w")
+			#
+			# 	nc_out.createDimension('lat', len(self._masks.lat))
+			# 	nc_out.createDimension('lon', len(self._masks.lon))
+			# 	nc_out.createDimension('region', len(self._masks.region))
+			#
+			# 	outVar = nc_out.createVariable('lat', 'f', ('lat',))
+			# 	outVar.units='deg south'
+			# 	outVar[:] = self._masks.lat[:]
+			#
+			# 	outVar = nc_out.createVariable('lon', 'f', ('lon',))
+			# 	outVar.units='deg east'
+			# 	outVar[:] = self._masks.lon[:]
+			#
+			# 	outVar = nc_out.createVariable('region', 'f', ('region',))
+			# 	outVar.region_names = ', '.join([str(index)+': '+region for index,region in zip(range(len(self._masks.region)),self._masks.region)])
+			# 	outVar[:]= range(len(self._masks.region))
+			#
+			# 	outVar = nc_out.createVariable('mask', 'f', ('region','lat','lon',))
+			# 	outVar[:] = np.asarray(self._masks)
+			#
+			# 	nc_out.close()
 
 	def derive_time_slices(self,ref_period,target_periods,period_names,mask_for_ref_period='global'):
 		'''
