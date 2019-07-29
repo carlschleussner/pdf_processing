@@ -80,7 +80,7 @@ class PDF_Processing(object):
 
 		self._data=input_data
 
-		mask_file='support/'+str(len(lat))+'x'+str(len(lon))+add_info+'_'+self._var+'_masks.nc4'
+		mask_file='support/'+str(len(lat))+'x'+str(len(lon))+dataset+'_'+self._var+'_masks.nc4'
 		print mask_file
 
 		# try to load existing mask
